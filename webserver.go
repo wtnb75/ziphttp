@@ -48,12 +48,15 @@ func (h *ZipHandler) filename(r *http.Request) string {
 	return strings.TrimPrefix(fname, "/")
 }
 
-func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int) {
+func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
 	filestr := h.zipfile.File[idx]
 	slog.Debug("compressed response", "length", filestr.CompressedSize64, "original", filestr.UncompressedSize64)
 	w.Header().Add("Content-Encoding", "gzip")
 	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
 	w.Header().Add("Content-Length", strconv.FormatUint(filestr.CompressedSize64+18, 10))
+	if etag != "" {
+		w.Header().Add("Etag", etag)
+	}
 	written, err := CopyGzip(w, filestr)
 	if err != nil {
 		slog.Error("copygzip", "written", written, "error", err)
@@ -123,7 +126,12 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if has_gzip {
 		if idx, ok := h.deflmap[fname]; ok {
 			// fast path
-			h.handle_gzip(w, idx)
+			etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File[idx].CRC32), 16)
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			h.handle_gzip(w, idx, etag)
 			return
 		}
 	}
