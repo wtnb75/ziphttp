@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"io/fs"
+	"os"
 	"time"
 
 	"archive/zip"
@@ -16,13 +18,80 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
+type ZipFile interface {
+	File(int) *zip.File
+	Open(string) (fs.File, error)
+	Close() error
+	Files() int
+}
+
+type ZipFileBytes struct {
+	z *zip.Reader
+}
+
+func (z *ZipFileBytes) Open(name string) (fs.File, error) {
+	return z.z.Open(name)
+}
+
+func (z *ZipFileBytes) File(idx int) *zip.File {
+	return z.z.File[idx]
+}
+
+func (z *ZipFileBytes) Files() int {
+	return len(z.z.File)
+}
+
+func (z *ZipFileBytes) Close() error {
+	return nil
+}
+
+func NewZipFileBytes(input []byte) (*ZipFileBytes, error) {
+	buf := bytes.NewReader(input)
+	z, err := zip.NewReader(buf, int64(len(input)))
+	if err != nil {
+		return nil, err
+	}
+	res := ZipFileBytes{z: z}
+	return &res, nil
+}
+
+type ZipFileFile struct {
+	z *zip.ReadCloser
+}
+
+func (z *ZipFileFile) Open(name string) (fs.File, error) {
+	return z.z.Open(name)
+}
+
+func (z *ZipFileFile) File(idx int) *zip.File {
+	return z.z.File[idx]
+}
+
+func (z *ZipFileFile) Files() int {
+	return len(z.z.File)
+}
+
+func (z *ZipFileFile) Close() error {
+	return z.z.Close()
+}
+
+func NewZipFileFile(name string) (*ZipFileFile, error) {
+	z, err := zip.OpenReader(name)
+	if err != nil {
+		return nil, err
+	}
+	res := ZipFileFile{z: z}
+	return &res, nil
+}
+
 type ZipHandler struct {
-	zipfile     *zip.ReadCloser
+	zipfile     ZipFile
 	autoindex   bool
 	stripprefix string
 	addprefix   string
 	indexname   string
 	deflmap     map[string]int
+	storemap    map[string]int
 }
 
 func (h *ZipHandler) accept_encoding(r *http.Request) ([]string, bool) {
@@ -49,7 +118,7 @@ func (h *ZipHandler) filename(r *http.Request) string {
 }
 
 func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
-	filestr := h.zipfile.File[idx]
+	filestr := h.zipfile.File(idx)
 	slog.Debug("compressed response", "length", filestr.CompressedSize64, "original", filestr.UncompressedSize64)
 	w.Header().Add("Content-Encoding", "gzip")
 	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
@@ -66,6 +135,14 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
 }
 
 func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, fname string) {
+	idx, ok := h.deflmap[fname]
+	if !ok {
+		idx, ok = h.storemap[fname]
+	}
+	if ok {
+		etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+		w.Header().Add("Etag", etag)
+	}
 	f, err := h.zipfile.Open(fname)
 	if err != nil {
 		slog.Info("cannot read file", "name", fname, "error", err)
@@ -126,7 +203,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if has_gzip {
 		if idx, ok := h.deflmap[fname]; ok {
 			// fast path
-			etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File[idx].CRC32), 16)
+			etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
 			if r.Header.Get("If-None-Match") == etag {
 				w.WriteHeader(http.StatusNotModified)
 				return
@@ -136,27 +213,59 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// slow path
-	h.handle_normal(w, fname, r.URL.Path)
+	h.handle_normal(w, r.URL.Path, fname)
 }
 
-func (h *ZipHandler) initialize() {
-	for i := range h.zipfile.File {
-		if h.zipfile.File[i].Method != zip.Deflate {
+func (h *ZipHandler) init2() {
+	for i := 0; i < h.zipfile.Files(); i++ {
+		fi := h.zipfile.File(i)
+		if fi.FileInfo().IsDir() {
 			continue
+		} else if fi.Method == zip.Deflate {
+			h.storemap[fi.Name] = i
+		} else {
+			h.deflmap[fi.Name] = i
 		}
-		h.deflmap[h.zipfile.File[i].Name] = i
 	}
 }
 
+func (h *ZipHandler) initialize_memory(input []byte) error {
+	var err error
+	h.zipfile, err = NewZipFileBytes(input)
+	if err != nil {
+		return err
+	}
+	h.init2()
+	return nil
+}
+
+func (h *ZipHandler) initialize(archive string) error {
+	var err error
+	h.zipfile, err = NewZipFileFile(archive)
+	if err != nil {
+		return err
+	}
+	h.init2()
+	return nil
+}
+
+func (h *ZipHandler) Close() error {
+	if h.zipfile != nil {
+		return h.zipfile.Close()
+	}
+	return nil
+}
+
 type webserver struct {
-	Listen            string         `short:"l" long:"listen" default:":8080" description:"listen address:port"`
+	Listen            string         `short:"l" long:"listen" default:":3000" description:"listen address:port"`
 	AutoIndex         bool           `long:"autoindex" description:"autoindex directory"`
-	IndexFilename     string         `long:"index" description:"index filename"`
+	IndexFilename     string         `long:"index" description:"index filename" default:"index.html"`
 	Archive           flags.Filename `short:"f" long:"archive" description:"archive file"`
 	StripPrefix       string         `long:"stripprefix" description:"strip prefix in archive"`
 	AddPrefix         string         `long:"addprefix" description:"add prefix in URL path"`
 	ReadTimeout       string         `long:"read-timeout" default:"10s"`
 	ReadHeaderTimeout string         `long:"read-header-timeout" default:"10s"`
+	InMemory          bool           `long:"in-memory" description:"load zip to memory"`
 }
 
 func (cmd *webserver) Execute(args []string) (err error) {
@@ -171,15 +280,34 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		addprefix:   cmd.AddPrefix,
 		indexname:   cmd.IndexFilename,
 		deflmap:     make(map[string]int),
+		storemap:    make(map[string]int),
 	}
-	hdl.zipfile, err = zip.OpenReader(string(cmd.Archive))
-	if err != nil {
-		slog.Error("open error", "error", err)
-		return err
+	if cmd.InMemory {
+		fp, err := os.Open(string(cmd.Archive))
+		if err != nil {
+			slog.Error("open file to memory", "file", cmd.Archive, "error", err)
+			return err
+		}
+		buf, err := io.ReadAll(fp)
+		if err != nil {
+			slog.Error("read file to memory", "file", cmd.Archive, "error", err)
+			return err
+		}
+		fp.Close()
+		err = hdl.initialize_memory(buf)
+		if err != nil {
+			slog.Error("initialize failed", "err", err)
+			return err
+		}
+	} else {
+		err = hdl.initialize(string(cmd.Archive))
+		if err != nil {
+			slog.Error("initialize failed", "err", err)
+			return err
+		}
 	}
-	defer hdl.zipfile.Close()
-	hdl.initialize()
-	slog.Info("open success", "comment", hdl.zipfile.Comment, "files", len(hdl.zipfile.File), "deflate", len(hdl.deflmap))
+	defer hdl.Close()
+	slog.Info("open success", "files", hdl.zipfile.Files(), "deflate", len(hdl.deflmap))
 	rto, err := time.ParseDuration(cmd.ReadTimeout)
 	if err != nil {
 		slog.Error("read timeout expression", "error", err)
@@ -195,6 +323,7 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		Handler:           nil,
 		ReadTimeout:       rto,
 		ReadHeaderTimeout: rhto,
+		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo),
 	}
 	http.Handle("/", &hdl)
 	err = server.ListenAndServe()
