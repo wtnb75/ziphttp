@@ -84,7 +84,6 @@ func NewZipFileFile(name string) (*ZipFileFile, error) {
 
 type ZipHandler struct {
 	zipfile     ZipFile
-	autoindex   bool
 	stripprefix string
 	addprefix   string
 	indexname   string
@@ -132,58 +131,28 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
 	}
 }
 
-func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, fname string) {
-	idx, ok := h.deflmap[fname]
-	if !ok {
-		idx, ok = h.storemap[fname]
-	}
-	if ok {
-		etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, idx int, etag string) {
+	filestr := h.zipfile.File(idx)
+	if etag != "" {
 		w.Header().Add("Etag", etag)
 	}
-	f, err := h.zipfile.Open(fname)
+	f, err := filestr.Open()
 	if err != nil {
-		slog.Info("cannot read file", "name", fname, "error", err)
+		slog.Info("open failed", "path", urlpath, "error", err)
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(w, "not found")
 		return
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		slog.Info("stat failed", "name", fname, "error", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal server error")
-		return
-	}
-	if fi.IsDir() {
-		if h.autoindex {
-			entries, err := f.(fs.ReadDirFile).ReadDir(0)
-			if err != nil {
-				slog.Warn("readir", "name", fname, "error", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, "internal server error")
-				return
-			}
-			for _, entry := range entries {
-				slog.Info("file", "name", entry.Name())
-				einfo, err := entry.Info()
-				if err != nil {
-					slog.Warn("info", "parent", fname, "name", entry.Name, "error", err)
-					continue
-				}
-				fmt.Fprintln(w, entry.Name(), einfo.Size())
-			}
-			return
-		}
+	if filestr.FileInfo().IsDir() {
 		slog.Info("redirect directory", "path", urlpath)
 		w.Header().Add("Location", urlpath+"/")
 		w.WriteHeader(http.StatusMovedPermanently)
 		return
 	}
-	slog.Debug("normal response", "length", fi.Size())
-	w.Header().Add("Last-Modified", fi.ModTime().Format(http.TimeFormat))
-	w.Header().Add("Content-Length", strconv.FormatInt(fi.Size(), 10))
+	slog.Debug("normal response", "length", filestr.UncompressedSize64)
+	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
+	w.Header().Add("Content-Length", strconv.FormatUint(filestr.UncompressedSize64, 10))
 	written, err := io.Copy(w, f)
 	if err != nil {
 		slog.Error("copy error", "error", err, "written", written)
@@ -212,12 +181,25 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// slow path
-	h.handle_normal(w, r.URL.Path, fname)
+	idx, ok := h.deflmap[fname]
+	if !ok {
+		idx, ok = h.storemap[fname]
+	}
+	if ok {
+		etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		h.handle_normal(w, r.URL.Path, idx, etag)
+	}
 }
 
 func (h *ZipHandler) init2() {
 	for i := 0; i < h.zipfile.Files(); i++ {
 		fi := h.zipfile.File(i)
+		offset, err := fi.DataOffset()
+		slog.Debug("file", "n", i, "offset", offset, "error", err)
 		if fi.FileInfo().IsDir() {
 			slog.Debug("isdir", "name", fi.Name)
 			continue
@@ -260,7 +242,6 @@ func (h *ZipHandler) Close() error {
 
 type webserver struct {
 	Listen            string `short:"l" long:"listen" default:":3000" description:"listen address:port"`
-	AutoIndex         bool   `long:"autoindex" description:"autoindex directory"`
 	IndexFilename     string `long:"index" description:"index filename" default:"index.html"`
 	StripPrefix       string `long:"stripprefix" description:"strip prefix in archive"`
 	AddPrefix         string `long:"addprefix" description:"add prefix in URL path"`
@@ -276,7 +257,6 @@ func (cmd *webserver) Execute(args []string) (err error) {
 	slog.Info("args", "args", args)
 	hdl := ZipHandler{
 		zipfile:     nil,
-		autoindex:   cmd.AutoIndex,
 		stripprefix: cmd.StripPrefix,
 		addprefix:   cmd.AddPrefix,
 		indexname:   cmd.IndexFilename,
@@ -285,17 +265,46 @@ func (cmd *webserver) Execute(args []string) (err error) {
 	}
 	archivefile := archiveFilename()
 	if cmd.InMemory {
+		rd0, err := zip.OpenReader(archivefile)
+		if err != nil {
+			slog.Error("open reader", "file", archivefile, "error", err)
+			return err
+		}
+		if len(rd0.File) == 0 {
+			slog.Error("no content", "file", archivefile, "files", len(rd0.File), "comment", rd0.Comment)
+			return fmt.Errorf("no content in file")
+		}
+		offs, err := rd0.File[0].DataOffset()
+		if err != nil {
+			slog.Error("dataoffset", "file", archivefile, "error", err)
+			return err
+		}
+		slog.Debug("first offset", "offset", offs, "header", offs-46)
+		if offs > 46 {
+			offs -= 46
+		}
+		err = rd0.Close()
+		if err != nil {
+			slog.Error("close", "file", archivefile, "error", err)
+			return err
+		}
 		fp, err := os.Open(archivefile)
 		if err != nil {
-			slog.Error("open file to memory", "file", globalOption.Archive, "error", err)
+			slog.Error("open file to memory", "file", archivefile, "error", err)
+			return err
+		}
+		_, err = fp.Seek(offs, io.SeekStart)
+		if err != nil {
+			slog.Error("seek", "file", archivefile, "error", err)
 			return err
 		}
 		buf, err := io.ReadAll(fp)
 		if err != nil {
-			slog.Error("read file to memory", "file", globalOption.Archive, "error", err)
+			slog.Error("read file to memory", "file", archivefile, "error", err)
 			return err
 		}
 		fp.Close()
+		slog.Debug("memory size", "file", archivefile, "size", len(buf))
 		err = hdl.initialize_memory(buf)
 		if err != nil {
 			slog.Error("initialize failed", "err", err)
