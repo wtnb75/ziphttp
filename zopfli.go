@@ -44,8 +44,8 @@ func archive_single(path string, archivepath string, store_pat []string, w *zip.
 	}
 	buf := make([]byte, 512)
 	buflen, err := rd.Read(buf)
-	if err != nil {
-		slog.Error("ReadFile", "path", path, "error", err)
+	if err != nil && err != io.EOF {
+		slog.Error("ReadFile", "path", path, "error", err, "buflen", buflen)
 		return err
 	}
 	_, err = rd.Seek(0, io.SeekStart)
@@ -140,12 +140,13 @@ func from_zip(root string, exclude []string, store_pat []string, w *zip.Writer) 
 		}
 		buf := make([]byte, 512)
 		buflen, err := rd0.Read(buf)
-		if err != nil {
-			slog.Error("ReadZip", "root", root, "file", f.Name, "error", err)
+		if err != nil && err != io.EOF {
+			slog.Error("ReadZip", "root", root, "file", f.Name, "error", err, "buflen", buflen)
 			return err
 		}
 		method := zip.Deflate
 		if ispat(f.Name, buf[0:buflen], store_pat) {
+			slog.Debug("store", "name", f.Name)
 			method = zip.Store
 		}
 		rd0.Close()
