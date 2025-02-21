@@ -5,13 +5,10 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/foobaz/go-zopfli/zopfli"
-	"github.com/jessevdk/go-flags"
 )
 
 type DeflateWriteCloser struct {
@@ -26,39 +23,6 @@ func (d *DeflateWriteCloser) Write(in []byte) (int, error) {
 
 func (d *DeflateWriteCloser) Close() error {
 	return nil
-}
-
-func ispat(name string, head []byte, pat []string) bool {
-	// filename pattern
-	for _, p := range pat {
-		if matched, _ := filepath.Match(p, name); matched {
-			return true
-		}
-	}
-	content_type := http.DetectContentType(head)
-	sname := strings.SplitN(content_type, ";", 2)
-	if len(sname) != 0 {
-		for _, p := range pat {
-			if matched, _ := filepath.Match(p, sname[0]); matched {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func ismatch(name string, exclude []string) bool {
-	for _, pat := range exclude {
-		res, err := filepath.Match(pat, name)
-		if err != nil {
-			slog.Error("match error", "pattern", pat, "name", name, "error", err)
-		}
-		if res {
-			slog.Debug("match", "pattern", pat, "name", name)
-			return res
-		}
-	}
-	return false
 }
 
 func archive_single(path string, archivepath string, store_pat []string, w *zip.Writer) error {
@@ -84,17 +48,19 @@ func archive_single(path string, archivepath string, store_pat []string, w *zip.
 		slog.Error("ReadFile", "path", path, "error", err)
 		return err
 	}
+	_, err = rd.Seek(0, io.SeekStart)
+	if err != nil {
+		slog.Error("seek", "path", path, "error", err)
+		return err
+	}
+	slog.Debug("read head", "length", buflen)
 	if ispat(archivepath, buf[0:buflen], store_pat) {
+		slog.Debug("not deflate", "name", archivepath)
 		hdr.Method = zip.Store
 	}
 	fp, err := w.CreateHeader(&hdr)
 	if err != nil {
 		slog.Error("zipCreate", "path", archivepath, "error", err)
-		return err
-	}
-	written0, err := fp.Write(buf[0:buflen])
-	if err != nil {
-		slog.Error("WriteHead", "path", path, "archivepath", archivepath, "error", err, "written", written0)
 		return err
 	}
 	written, err := io.Copy(fp, rd)
@@ -167,13 +133,13 @@ func from_zip(root string, exclude []string, store_pat []string, w *zip.Writer) 
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		rd, err := f.Open()
+		rd0, err := f.Open()
 		if err != nil {
 			slog.Error("OpenZip", "root", root, "file", f.Name, "error", err)
 			return err
 		}
 		buf := make([]byte, 512)
-		buflen, err := rd.Read(buf)
+		buflen, err := rd0.Read(buf)
 		if err != nil {
 			slog.Error("ReadZip", "root", root, "file", f.Name, "error", err)
 			return err
@@ -181,6 +147,12 @@ func from_zip(root string, exclude []string, store_pat []string, w *zip.Writer) 
 		method := zip.Deflate
 		if ispat(f.Name, buf[0:buflen], store_pat) {
 			method = zip.Store
+		}
+		rd0.Close()
+		rd, err := f.Open()
+		if err != nil {
+			slog.Error("OpenZip", "root", root, "file", f.Name, "error", err)
+			return err
 		}
 		fh := zip.FileHeader{
 			Name:     f.FileHeader.Name,
@@ -195,14 +167,9 @@ func from_zip(root string, exclude []string, store_pat []string, w *zip.Writer) 
 			slog.Error("CreateHeader", "root", root, "file", f.Name, "error", err)
 			return err
 		}
-		written0, err := wr.Write(buf[0:buflen])
-		if err != nil {
-			slog.Error("Write0", "root", root, "file", f.Name, "error", err, "written", written0)
-			return err
-		}
 		written, err := io.Copy(wr, rd)
 		if err != nil {
-			slog.Error("Copy", "root", root, "file", f.Name, "error", err, "written", written0)
+			slog.Error("Copy", "root", root, "file", f.Name, "error", err, "written", written)
 			return err
 		}
 		err = rd.Close()
@@ -217,24 +184,60 @@ func from_zip(root string, exclude []string, store_pat []string, w *zip.Writer) 
 }
 
 type ZopfliZip struct {
-	Archive   flags.Filename `short:"f" long:"archive" description:"archive file"`
-	StripRoot bool           `short:"s" long:"strip-root" description:"strip root path"`
-	Exclude   []string       `short:"x" long:"exclude" description:"exclude files"`
-	Stored    []string       `short:"n" long:"stored" description:"non compress patterns"`
+	StripRoot bool     `short:"s" long:"strip-root" description:"strip root path"`
+	Exclude   []string `short:"x" long:"exclude" description:"exclude files"`
+	Stored    []string `short:"n" long:"stored" description:"non compress patterns"`
 }
 
 func (cmd *ZopfliZip) Execute(args []string) (err error) {
 	if globalOption.Verbose {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
-	ofp, err := os.Create(string(cmd.Archive))
+	var mode os.FileMode
+	if globalOption.Self {
+		mode = 0755
+	} else {
+		mode = 0644
+	}
+	ofp, err := os.OpenFile(string(globalOption.Archive), os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
-		slog.Error("openOutput", "path", cmd.Archive, "error", err)
+		slog.Error("openOutput", "path", globalOption.Archive, "error", err)
 		return err
 	}
 	defer ofp.Close()
+	err = ofp.Truncate(0)
+	if err != nil {
+		slog.Error("truncate", "path", globalOption.Archive, "error", err)
+		return err
+	}
+	var written int64
+	if globalOption.Self {
+		self_exc, err := os.Executable()
+		if err != nil {
+			slog.Error("self", "error", err)
+			return err
+		}
+		self_fp, err := os.Open(self_exc)
+		if err != nil {
+			slog.Error("self open", "name", self_exc, "error", err)
+			return err
+		}
+		defer self_fp.Close()
+		written, err = io.Copy(ofp, self_fp)
+		if err != nil {
+			slog.Error("self copy", "name", self_exc, "dest", globalOption.Archive, "error", err, "written", written)
+			return err
+		}
+		slog.Debug("copy", "written", written)
+		err = ofp.Sync()
+		if err != nil {
+			slog.Error("sync", "name", self_exc, "error", err)
+		}
+	}
 	zipfile := zip.NewWriter(ofp)
 	defer zipfile.Close()
+	slog.Debug("setoffiset", "written", written)
+	zipfile.SetOffset(written)
 	zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
 		opts := zopfli.DefaultOptions()
 		dc := DeflateWriteCloser{opts: opts, output: out}

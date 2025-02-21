@@ -14,8 +14,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/jessevdk/go-flags"
 )
 
 type ZipFile interface {
@@ -186,11 +184,12 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, fname 
 	slog.Debug("normal response", "length", fi.Size())
 	w.Header().Add("Last-Modified", fi.ModTime().Format(http.TimeFormat))
 	w.Header().Add("Content-Length", strconv.FormatInt(fi.Size(), 10))
-	_, err = io.Copy(w, f)
+	written, err := io.Copy(w, f)
 	if err != nil {
-		slog.Error("write error", "error", err)
+		slog.Error("copy error", "error", err, "written", written)
 		return
 	}
+	slog.Debug("copy success", "written", written)
 }
 
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -220,11 +219,14 @@ func (h *ZipHandler) init2() {
 	for i := 0; i < h.zipfile.Files(); i++ {
 		fi := h.zipfile.File(i)
 		if fi.FileInfo().IsDir() {
+			slog.Debug("isdir", "name", fi.Name)
 			continue
 		} else if fi.Method == zip.Deflate {
-			h.storemap[fi.Name] = i
-		} else {
+			slog.Debug("isdeflate", "name", fi.Name)
 			h.deflmap[fi.Name] = i
+		} else {
+			slog.Debug("store", "name", fi.Name, "method", fi.Method)
+			h.storemap[fi.Name] = i
 		}
 	}
 }
@@ -257,15 +259,14 @@ func (h *ZipHandler) Close() error {
 }
 
 type webserver struct {
-	Listen            string         `short:"l" long:"listen" default:":3000" description:"listen address:port"`
-	AutoIndex         bool           `long:"autoindex" description:"autoindex directory"`
-	IndexFilename     string         `long:"index" description:"index filename" default:"index.html"`
-	Archive           flags.Filename `short:"f" long:"archive" description:"archive file"`
-	StripPrefix       string         `long:"stripprefix" description:"strip prefix in archive"`
-	AddPrefix         string         `long:"addprefix" description:"add prefix in URL path"`
-	ReadTimeout       string         `long:"read-timeout" default:"10s"`
-	ReadHeaderTimeout string         `long:"read-header-timeout" default:"10s"`
-	InMemory          bool           `long:"in-memory" description:"load zip to memory"`
+	Listen            string `short:"l" long:"listen" default:":3000" description:"listen address:port"`
+	AutoIndex         bool   `long:"autoindex" description:"autoindex directory"`
+	IndexFilename     string `long:"index" description:"index filename" default:"index.html"`
+	StripPrefix       string `long:"stripprefix" description:"strip prefix in archive"`
+	AddPrefix         string `long:"addprefix" description:"add prefix in URL path"`
+	ReadTimeout       string `long:"read-timeout" default:"10s"`
+	ReadHeaderTimeout string `long:"read-header-timeout" default:"10s"`
+	InMemory          bool   `long:"in-memory" description:"load zip to memory"`
 }
 
 func (cmd *webserver) Execute(args []string) (err error) {
@@ -282,15 +283,16 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 	}
+	archivefile := archiveFilename()
 	if cmd.InMemory {
-		fp, err := os.Open(string(cmd.Archive))
+		fp, err := os.Open(archivefile)
 		if err != nil {
-			slog.Error("open file to memory", "file", cmd.Archive, "error", err)
+			slog.Error("open file to memory", "file", globalOption.Archive, "error", err)
 			return err
 		}
 		buf, err := io.ReadAll(fp)
 		if err != nil {
-			slog.Error("read file to memory", "file", cmd.Archive, "error", err)
+			slog.Error("read file to memory", "file", globalOption.Archive, "error", err)
 			return err
 		}
 		fp.Close()
@@ -300,7 +302,7 @@ func (cmd *webserver) Execute(args []string) (err error) {
 			return err
 		}
 	} else {
-		err = hdl.initialize(string(cmd.Archive))
+		err = hdl.initialize(archivefile)
 		if err != nil {
 			slog.Error("initialize failed", "err", err)
 			return err

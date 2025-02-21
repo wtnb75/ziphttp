@@ -10,7 +10,21 @@ import (
 )
 
 var globalOption struct {
-	Verbose bool `short:"v" long:"verbose" description:"show verbose logs"`
+	Verbose bool           `short:"v" long:"verbose" description:"show verbose logs"`
+	Archive flags.Filename `short:"f" long:"archive" description:"archive file"`
+	Self    bool           `long:"self" description:"use executable zip"`
+}
+
+func archiveFilename() string {
+	if globalOption.Self {
+		res, err := os.Executable()
+		if err != nil {
+			slog.Error("self name", "error", err)
+			panic(err)
+		}
+		return res
+	}
+	return string(globalOption.Archive)
 }
 
 func main() {
