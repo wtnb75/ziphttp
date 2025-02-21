@@ -4,19 +4,18 @@ import (
 	"archive/zip"
 	"fmt"
 	"log/slog"
-
-	"github.com/jessevdk/go-flags"
 )
 
 type ZipList struct {
-	Archive flags.Filename `short:"f" long:"archive" description:"archive file"`
 }
 
 func (cmd *ZipList) Execute(args []string) (err error) {
 	if globalOption.Verbose {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
-	zipfile, err := zip.OpenReader(string(cmd.Archive))
+	var zipfile *zip.ReadCloser
+	filename := archiveFilename()
+	zipfile, err = zip.OpenReader(filename)
 	if err != nil {
 		slog.Error("open error", "error", err)
 		return err
