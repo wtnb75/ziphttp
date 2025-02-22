@@ -24,7 +24,10 @@ func TestZipList(t *testing.T) {
 	os.Stdout = w
 	zl := ZipList{}
 	globalOption.Archive = flags.Filename(fname)
-	zl.Execute([]string{"*"})
+	err = zl.Execute([]string{"*"})
+	if err != nil {
+		t.Error("execute error")
+	}
 	globalOption.Archive = ""
 	w.Close()
 	data, err := io.ReadAll(r)
