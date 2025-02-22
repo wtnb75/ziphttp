@@ -18,7 +18,10 @@ func TestStored(t *testing.T) {
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 	}
-	hdl.initialize_memory(testzip)
+	if err := hdl.initialize_memory(testzip); err!=nil{
+		t.Error("initialize", err)
+		return
+	}
 	req := httptest.NewRequest(http.MethodGet, "http://dummy.url.com/512b.txt", bytes.NewBuffer([]byte{}))
 	req.Header.Add("accept-encoding", "br, deflate,gzip ")
 	got := httptest.NewRecorder()
@@ -46,7 +49,10 @@ func TestDeflate(t *testing.T) {
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 	}
-	hdl.initialize_memory(testzip)
+	if err := hdl.initialize_memory(testzip); err!=nil{
+		t.Error("initialize", err)
+		return
+	}
 	req := httptest.NewRequest(http.MethodGet, "http://dummy.url.com/4kb.txt", bytes.NewBuffer([]byte{}))
 	req.Header.Add("accept-encoding", "br, gzip")
 	got := httptest.NewRecorder()
