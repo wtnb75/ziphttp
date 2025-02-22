@@ -4,7 +4,7 @@ on:
   push:
   workflow_dispatch:
 
-jobs
+jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
