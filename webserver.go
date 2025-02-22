@@ -170,6 +170,10 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("name", "uri", r.URL.Path, "name", fname)
 	if has_gzip {
 		if idx, ok := h.deflmap[fname]; ok {
+			if h.zipfile.File(idx).Flags&0x1 == 1 {
+				// encrypted
+				slog.Warn("encrypted", "name", fname, "flag", h.zipfile.File(idx).Flags)
+			}
 			// fast path
 			etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
 			if r.Header.Get("If-None-Match") == etag {
@@ -186,13 +190,20 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		idx, ok = h.storemap[fname]
 	}
 	if ok {
+		if h.zipfile.File(idx).Flags&0x1 == 1 {
+			// encrypted
+			slog.Warn("encrypted", "name", fname, "flag", h.zipfile.File(idx).Flags)
+		}
 		etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 		h.handle_normal(w, r.URL.Path, idx, etag)
+		return
 	}
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Println(w, "not found")
 }
 
 func (h *ZipHandler) init2() {
@@ -274,14 +285,16 @@ func (cmd *webserver) Execute(args []string) (err error) {
 			slog.Error("no content", "file", archivefile, "files", len(rd0.File), "comment", rd0.Comment)
 			return fmt.Errorf("no content in file")
 		}
-		offs, err := rd0.File[0].DataOffset()
+		first := rd0.File[0]
+		offs, err := first.DataOffset()
 		if err != nil {
 			slog.Error("dataoffset", "file", archivefile, "error", err)
 			return err
 		}
-		slog.Debug("first offset", "offset", offs, "header", offs-46)
-		if offs > 46 {
-			offs -= 46
+		hdrlen := int64(len(first.Name) + len(first.Comment) + len(first.Extra) + 30)
+		slog.Debug("first offset", "offset", offs, "header", hdrlen)
+		if offs > hdrlen {
+			offs -= hdrlen
 		}
 		err = rd0.Close()
 		if err != nil {
