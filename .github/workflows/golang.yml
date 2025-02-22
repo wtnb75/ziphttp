@@ -35,7 +35,7 @@ jobs:
         echo "## coverage report" >> $GITHUB_STEP_SUMMARY
         echo ''                   >> $GITHUB_STEP_SUMMARY
         echo '```'                >> $GITHUB_STEP_SUMMARY
-        go tool cover -func=cover.out -o $GITHUB_STEP_SUMMARY
+        go tool cover -func=cover.out >> $GITHUB_STEP_SUMMARY
         echo '```'                >> $GITHUB_STEP_SUMMARY
     - uses: goreleaser/goreleaser-action@v6
       with:
