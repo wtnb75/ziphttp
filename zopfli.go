@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -14,15 +15,15 @@ import (
 type DeflateWriteCloser struct {
 	opts   zopfli.Options
 	output io.Writer
+	buf    bytes.Buffer
 }
 
 func (d *DeflateWriteCloser) Write(in []byte) (int, error) {
-	err := zopfli.DeflateCompress(&d.opts, in, d.output)
-	return len(in), err
+	return d.buf.Write(in)
 }
 
 func (d *DeflateWriteCloser) Close() error {
-	return nil
+	return zopfli.DeflateCompress(&d.opts, d.buf.Bytes(), d.output)
 }
 
 func archive_single(path string, archivepath string, store_pat []string, minsize uint, w *zip.Writer) error {
@@ -197,9 +198,7 @@ type ZopfliZip struct {
 }
 
 func (cmd *ZopfliZip) Execute(args []string) (err error) {
-	if globalOption.Verbose {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
+	init_log()
 	var mode os.FileMode
 	if globalOption.Self {
 		mode = 0755
