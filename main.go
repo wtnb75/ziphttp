@@ -10,8 +10,8 @@ import (
 
 var globalOption struct {
 	Verbose bool           `short:"v" long:"verbose" description:"show verbose logs"`
-	Archive flags.Filename `short:"f" long:"archive" description:"archive file"`
-	Self    bool           `long:"self" description:"use executable zip"`
+	Archive flags.Filename `short:"f" long:"archive" description:"archive file" env:"ZIPHTTP_ARCHIVE"`
+	Self    bool           `long:"self" description:"use executable zip" env:"ZIPHTTP_SELF"`
 }
 
 func archiveFilename() string {
