@@ -24,5 +24,7 @@ jobs:
       uses: becheran/go-testreport@main
       with:
         input: report.json
-    - name: build
-      run: go build
+    - uses: goreleaser/goreleaser-action@v6
+      with:
+        distribution: goreleaser
+        args: release --auto-snapshot --clean --skip archive
