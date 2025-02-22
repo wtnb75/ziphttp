@@ -30,6 +30,13 @@ jobs:
       uses: becheran/go-testreport@main
       with:
         input: report.json
+    - name: coverage
+      run: |
+        echo "## coverage report" >> $GITHUB_STEP_SUMMARY
+        echo ''                   >> $GITHUB_STEP_SUMMARY
+        echo '```'                >> $GITHUB_STEP_SUMMARY
+        go tool cover -func=cover.out -o $GITHUB_STEP_SUMMARY
+        echo '```'                >> $GITHUB_STEP_SUMMARY
     - uses: goreleaser/goreleaser-action@v6
       with:
         distribution: goreleaser
