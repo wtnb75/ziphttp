@@ -2,5 +2,8 @@
 *.tar
 *.sh
 ziphttp
+cover.html
+cover.out
+report.json
 # Added by goreleaser init:
 dist/
