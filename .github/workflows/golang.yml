@@ -36,10 +36,10 @@ jobs:
         args: release --auto-snapshot --clean --skip archive
     - name: push images
       run: |
-        docker push ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}-arm64
-        docker push ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}-amd64
+        docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-arm64
+        docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-amd64
         docker manifest create \
-           ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }} \
-           ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}-arm64 \
-           ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}-amd64
-        docker push ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}
+           ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+           ghcr.io/${{ github.repository }}:${{ github.ref_name }}-arm64 \
+           ghcr.io/${{ github.repository }}:${{ github.ref_name }}-amd64
+        docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}

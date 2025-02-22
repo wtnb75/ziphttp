@@ -25,6 +25,10 @@ dockers:
     build_flag_templates:
       - "--pull"
       - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
     goarch: amd64
   - image_templates:
       - "ghcr.io/wtnb75/{{ .ProjectName }}:latest-arm64"
@@ -33,6 +37,10 @@ dockers:
     build_flag_templates:
       - "--pull"
       - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
     goarch: arm64
 
 docker_manifests:
