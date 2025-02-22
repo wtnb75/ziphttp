@@ -20,8 +20,7 @@ builds:
 dockers:
   - image_templates:
       - "ghcr.io/wtnb75/{{ .ProjectName }}:latest-amd64"
-      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-amd64"
-      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Branch }}-amd64"
+      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-amd64"
     use: buildx
     build_flag_templates:
       - "--pull"
@@ -29,8 +28,7 @@ dockers:
     goarch: amd64
   - image_templates:
       - "ghcr.io/wtnb75/{{ .ProjectName }}:latest-arm64"
-      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-arm64"
-      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Branch }}-arm64"
+      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-arm64"
     use: buildx
     build_flag_templates:
       - "--pull"
@@ -42,13 +40,13 @@ docker_manifests:
     image_templates:
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-arm64"
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-amd64"
-  - name_template: "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Branch }}"
+  - name_template: "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}"
     image_templates:
-       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Branch }}-arm64"
-       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Branch }}-amd64"
+       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-arm64"
+       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-amd64"
 
 archives:
-  - formats: ['tar.gz']
+  - formats: ['binary']
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -60,16 +58,8 @@ archives:
       - goos: windows
         formats: ['zip']
 
+snapshot:
+  version_template: "{{ .Branch }}"
+
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-
-release:
-  footer: >-
-
-    ---
-
-    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
+  disable: true

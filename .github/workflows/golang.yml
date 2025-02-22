@@ -28,3 +28,5 @@ jobs:
       with:
         distribution: goreleaser
         args: release --auto-snapshot --clean --skip archive
+    - name: list
+      run: docker images
