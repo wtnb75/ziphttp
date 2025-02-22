@@ -1,0 +1,28 @@
+name: golang
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: stable
+    - name: format
+      run: go fmt ./...
+    - name: vet
+      run: go vet ./...
+    - name: lint
+      uses: golangci/golangci-lint-action@v6
+    - name: test
+      run: go test -v ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./... -json > report.json
+    - name: report
+      uses: becheran/go-testreport@main
+      with:
+        input: report.json
+    - name: build
+      run: go build
