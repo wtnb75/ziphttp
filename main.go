@@ -10,6 +10,8 @@ import (
 
 var globalOption struct {
 	Verbose bool           `short:"v" long:"verbose" description:"show verbose logs"`
+	Quiet   bool           `short:"q" long:"quiet" description:"suppress logs"`
+	JsonLog bool           `long:"json-log" description:"use json format for logging"`
 	Archive flags.Filename `short:"f" long:"archive" description:"archive file" env:"ZIPHTTP_ARCHIVE"`
 	Self    bool           `long:"self" description:"use executable zip" env:"ZIPHTTP_SELF"`
 }
@@ -24,6 +26,19 @@ func archiveFilename() string {
 		return res
 	}
 	return string(globalOption.Archive)
+}
+
+func init_log() {
+	var level slog.Level = slog.LevelInfo
+	if globalOption.Verbose {
+		level = slog.LevelDebug
+	} else if globalOption.Quiet {
+		level = slog.LevelWarn
+	}
+	slog.SetLogLoggerLevel(level)
+	if globalOption.JsonLog {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	}
 }
 
 func main() {

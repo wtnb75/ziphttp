@@ -16,9 +16,7 @@ type ZiptoGzip struct {
 }
 
 func (cmd *ZiptoGzip) Execute(args []string) (err error) {
-	if globalOption.Verbose {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
+	init_log()
 	filename := archiveFilename()
 	zipfile, err := zip.OpenReader(filename)
 	if err != nil {

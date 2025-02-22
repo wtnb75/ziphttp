@@ -10,9 +10,7 @@ type ZipList struct {
 }
 
 func (cmd *ZipList) Execute(args []string) (err error) {
-	if globalOption.Verbose {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
+	init_log()
 	var zipfile *zip.ReadCloser
 	filename := archiveFilename()
 	zipfile, err = zip.OpenReader(filename)

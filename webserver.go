@@ -262,9 +262,7 @@ type webserver struct {
 }
 
 func (cmd *webserver) Execute(args []string) (err error) {
-	if globalOption.Verbose {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
+	init_log()
 	slog.Info("args", "args", args)
 	hdl := ZipHandler{
 		zipfile:     nil,
