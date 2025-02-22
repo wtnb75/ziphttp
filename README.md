@@ -33,7 +33,7 @@ from docker
 
 ## Run
 
-- serve a zipfile port 8888
+- serve a zipfile on port 8888
     - `ziphttp webserver -f your-zip.zip -l :8888`
 - optimize zip with zopfli compression
     - `ziphttp zopflizip -f new-zip.zip [directory or file or .zip]...`

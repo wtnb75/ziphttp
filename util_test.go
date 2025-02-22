@@ -10,25 +10,6 @@ import (
 	"testing"
 )
 
-func prepare(t *testing.T) string {
-	fp, err := os.CreateTemp("", "zip")
-	if err != nil {
-		t.Error("CreateTemp", err)
-		return ""
-	}
-	defer fp.Close()
-	written, err := fp.Write(testzip)
-	if err != nil {
-		t.Error("WriteTmp", err)
-		return ""
-	}
-	if written != len(testzip) {
-		t.Error("short write?", written, len(testzip))
-		return ""
-	}
-	return fp.Name()
-}
-
 func TestCopyGzip(t *testing.T) {
 	fpname := prepare(t)
 	if fpname == "" {
@@ -67,25 +48,13 @@ func TestCopyGzip(t *testing.T) {
 }
 
 func Test_ispat(t *testing.T) {
-	if ispat("hello.txt", []byte{}, []string{"*.txt"}) != true {
+	if ispat([]byte("hello.txt"), []string{"text/*"}) != true {
 		t.Error("hello.txt")
 	}
-	if ispat("hello.txt", []byte{}, []string{"*.html", "*.css", "*.txt"}) != true {
+	if ispat([]byte("hello.txt"), []string{"application/json", "text/*"}) != true {
 		t.Error("hello.txt(multiple)")
 	}
-	if ispat("hello.txt.gz", []byte{}, []string{"*.html", "*.css", "*.txt"}) != false {
-		t.Error("hello.txt.gz")
-	}
-}
-
-func Test_ispat2(t *testing.T) {
-	if ispat("hello.txt", []byte("hello.txt"), []string{"text/*"}) != true {
-		t.Error("hello.txt")
-	}
-	if ispat("hello.txt", []byte("hello.txt"), []string{"application/json", "text/*"}) != true {
-		t.Error("hello.txt(multiple)")
-	}
-	if ispat("hello.txt", []byte("hello.txt"), []string{"image/*", "application/*"}) != false {
+	if ispat([]byte("hello.txt"), []string{"image/*", "application/*"}) != false {
 		t.Error("hello.txt(image)")
 	}
 }

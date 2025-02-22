@@ -58,7 +58,7 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 			return err
 		}
 		slog.Debug("read head", "length", buflen)
-		if ispat(archivepath, buf[0:buflen], store_pat) {
+		if ispat(buf[0:buflen], store_pat) {
 			slog.Debug("not deflate", "name", archivepath)
 			hdr.Method = zip.Store
 		}
@@ -138,23 +138,27 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, w
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		rd0, err := f.Open()
-		if err != nil {
-			slog.Error("OpenZip", "root", root, "file", f.Name, "error", err)
-			return err
-		}
-		buf := make([]byte, 512)
-		buflen, err := rd0.Read(buf)
-		if err != nil && err != io.EOF {
-			slog.Error("ReadZip", "root", root, "file", f.Name, "error", err, "buflen", buflen)
-			return err
-		}
 		method := zip.Deflate
-		if f.UncompressedSize64 < uint64(minsize) || ispat(f.Name, buf[0:buflen], store_pat) {
-			slog.Debug("store", "name", f.Name)
+		if f.UncompressedSize64 < uint64(minsize) {
 			method = zip.Store
+		} else {
+			rd0, err := f.Open()
+			if err != nil {
+				slog.Error("OpenZip", "root", root, "file", f.Name, "error", err)
+				return err
+			}
+			buf := make([]byte, 512)
+			buflen, err := rd0.Read(buf)
+			if err != nil && err != io.EOF {
+				slog.Error("ReadZip", "root", root, "file", f.Name, "error", err, "buflen", buflen)
+				return err
+			}
+			if ispat(buf[0:buflen], store_pat) {
+				slog.Debug("store", "name", f.Name)
+				method = zip.Store
+			}
+			rd0.Close()
 		}
-		rd0.Close()
 		rd, err := f.Open()
 		if err != nil {
 			slog.Error("OpenZip", "root", root, "file", f.Name, "error", err)

@@ -18,7 +18,7 @@ func TestStored(t *testing.T) {
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 	}
-	if err := hdl.initialize_memory(testzip); err!=nil{
+	if err := hdl.initialize_memory(testzip); err != nil {
 		t.Error("initialize", err)
 		return
 	}
@@ -49,7 +49,7 @@ func TestDeflate(t *testing.T) {
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 	}
-	if err := hdl.initialize_memory(testzip); err!=nil{
+	if err := hdl.initialize_memory(testzip); err != nil {
 		t.Error("initialize", err)
 		return
 	}
