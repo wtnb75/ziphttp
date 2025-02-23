@@ -60,7 +60,7 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 		size := i.UncompressedSize64
 		if i.Method == zip.Deflate {
 			fname = i.Name + ".gz"
-			size = i.CompressedSize64 + 18
+			size = i.CompressedSize64 + GzipHeaderSize + GzipFooterSize
 		}
 		if tarfile != nil {
 			slog.Debug("tar write", "name", fname)
