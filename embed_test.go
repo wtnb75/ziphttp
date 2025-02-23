@@ -10,20 +10,20 @@ import (
 var testzip []byte
 
 func prepare(t *testing.T) string {
-	fp, err := os.CreateTemp("", "zip")
+	fp, err := os.CreateTemp("", "zip******.zip")
 	if err != nil {
 		t.Error("CreateTemp", err)
-		return ""
+		panic(err)
 	}
 	defer fp.Close()
 	written, err := fp.Write(testzip)
 	if err != nil {
 		t.Error("WriteTmp", err)
-		return ""
+		panic(err)
 	}
 	if written != len(testzip) {
 		t.Error("short write?", written, len(testzip))
-		return ""
+		panic(err)
 	}
 	return fp.Name()
 }
