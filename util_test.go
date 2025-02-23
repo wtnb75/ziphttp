@@ -97,15 +97,25 @@ func TestArchiveOffset2(t *testing.T) {
 		panic(err)
 	}
 	defer os.Remove(tmpf.Name())
-	tmpf.Truncate(1024 * 1024)
-	tmpf.Seek(1024*1024, io.SeekStart)
+	if err = tmpf.Truncate(1024 * 1024); err != nil {
+		t.Error("truncate", err)
+		panic(err)
+	}
+	if _, err = tmpf.Seek(1024*1024, io.SeekStart); err != nil {
+		t.Error("seek", err)
+		panic(err)
+	}
 	zw := zip.NewWriter(tmpf)
 	zw.SetOffset(1024 * 1024)
 	cr, err := zw.Create("hello.txt")
 	if err != nil {
 		t.Error("error", err)
+		panic(err)
 	}
-	cr.Write([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})
+	if _, err = cr.Write([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9}); err != nil {
+		t.Error("write", err)
+		panic(err)
+	}
 	err = zw.Flush()
 	if err != nil {
 		t.Error("flush", err)
