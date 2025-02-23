@@ -315,7 +315,11 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		storemap:    make(map[string]int),
 	}
 
-	hdl.initialize(archiveFilename(), cmd.InMemory)
+	err = hdl.initialize(archiveFilename(), cmd.InMemory)
+	if err != nil {
+		slog.Error("initialize failed", "error", err)
+		return err
+	}
 	defer hdl.Close()
 	slog.Info("open success", "files", hdl.zipfile.Files(), "deflate", len(hdl.deflmap))
 	rto, err := time.ParseDuration(cmd.ReadTimeout)
