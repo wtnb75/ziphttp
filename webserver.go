@@ -204,7 +204,7 @@ func (h ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
-	fmt.Println(w, "not found")
+	fmt.Fprint(w, "not found")
 }
 
 func (h *ZipHandler) init2() {
