@@ -70,7 +70,7 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 		slog.Error("OpenFile", "path", path, "error", err)
 		return err
 	}
-	if st.Size() < int64(minsize) {
+	if st.Size() < int64(minsize) || ismatch(path, store_pat) {
 		hdr.Method = zip.Store
 	} else {
 		buf := make([]byte, 512)
@@ -113,15 +113,17 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 }
 
 func from_dir(root string, striproot bool, exclude []string, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
+	slog.Debug("from_dir", "exclude", exclude, "store", store_pat)
 	return filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
-		slog.Info("walk", "root", root, "path", path, "type", info.Type(), "name", info.Name(), "error", err)
 		if info.IsDir() {
 			slog.Debug("isdir", "root", root, "path", path)
 			return nil
 		}
 		if ismatch(path, exclude) {
+			slog.Debug("exclude-match", "path", path, "exclude", exclude)
 			return nil
 		}
+		slog.Info("walk", "root", root, "path", path, "type", info.Type(), "name", info.Name(), "error", err)
 		var archivepath string
 		if striproot {
 			archivepath, err = filepath.Rel(root, path)
@@ -146,6 +148,7 @@ func from_dir(root string, striproot bool, exclude []string, store_pat []string,
 }
 
 func from_file(root string, striproot bool, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
+	slog.Debug("from_file", "store", store_pat)
 	var archivepath string
 	if striproot {
 		archivepath = filepath.Base(root)
@@ -161,6 +164,7 @@ func from_file(root string, striproot bool, store_pat []string, minsize uint, ba
 }
 
 func from_zip(root string, exclude []string, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
+	slog.Debug("from_zip", "exclude", exclude, "store", store_pat)
 	zf, err := zip.OpenReader(root)
 	if err != nil {
 		slog.Error("openreader", "root", root, "error", err)
@@ -168,15 +172,15 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, b
 	}
 	defer zf.Close()
 	for _, f := range zf.File {
-		slog.Debug("processing", "name", f.Name, "fileinfo", f.FileInfo())
 		if ismatch(f.Name, exclude) {
 			continue
 		}
 		if f.FileInfo().IsDir() {
 			continue
 		}
+		slog.Info("walk(zip)", "name", f.Name, "fileinfo", f.FileInfo())
 		method := zip.Deflate
-		if f.UncompressedSize64 < uint64(minsize) {
+		if f.UncompressedSize64 < uint64(minsize) || ismatch(f.Name, store_pat) {
 			method = zip.Store
 		} else {
 			rd0, err := f.Open()
