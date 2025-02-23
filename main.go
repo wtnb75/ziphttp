@@ -47,6 +47,7 @@ func main() {
 	var ziplist ZipList
 	var ziptogzip ZiptoGzip
 	var zopflicmd ZopfliZip
+	var linkcmd LinkCommand
 	parser := flags.NewParser(&globalOption, flags.Default)
 	_, err = parser.AddCommand("webserver", "boot webserver", "boot zipweb", &webserv)
 	if err != nil {
@@ -66,6 +67,11 @@ func main() {
 	_, err = parser.AddCommand("zopflizip", "zopfli zip", "zopfli zip archiver", &zopflicmd)
 	if err != nil {
 		slog.Error("addcommand zopflizip", "error", err)
+		panic(err)
+	}
+	_, err = parser.AddCommand("relativelink", "convert link", "make link relative", &linkcmd)
+	if err != nil {
+		slog.Error("addcommand relativelink", "error", err)
 		panic(err)
 	}
 	if _, err := parser.Parse(); err != nil {
