@@ -80,9 +80,9 @@ func CopyGzip(ofp io.Writer, zf *zip.File) (int64, error) {
 	return written, nil
 }
 
-func ismatch(name string, patterns []string) bool {
+func ismatch0(name string, patterns []string) bool {
 	for _, pat := range patterns {
-		if matched, _ := filepath.Match(pat, filepath.Base(name)); matched {
+		if matched, _ := filepath.Match(pat, name); matched {
 			slog.Debug("match", "name", name, "pattern", pat)
 			return true
 		}
@@ -90,11 +90,16 @@ func ismatch(name string, patterns []string) bool {
 	return false
 }
 
+func ismatch(name string, patterns []string) bool {
+	return ismatch0(filepath.Base(name), patterns)
+}
+
 func ispat(head []byte, pat []string) bool {
 	content_type := http.DetectContentType(head)
+	slog.Debug("ispat", "type", content_type)
 	sname := strings.SplitN(content_type, ";", 2)
 	if len(sname) != 0 {
-		return ismatch(strings.TrimSpace(sname[0]), pat)
+		return ismatch0(strings.TrimSpace(sname[0]), pat)
 	}
 	return false
 }
