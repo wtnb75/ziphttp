@@ -82,7 +82,7 @@ func CopyGzip(ofp io.Writer, zf *zip.File) (int64, error) {
 
 func ismatch(name string, patterns []string) bool {
 	for _, pat := range patterns {
-		if matched, _ := filepath.Match(pat, name); matched {
+		if matched, _ := filepath.Match(pat, filepath.Base(name)); matched {
 			slog.Debug("match", "name", name, "pattern", pat)
 			return true
 		}
