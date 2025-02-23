@@ -109,6 +109,8 @@ func (h *ZipHandler) filename(r *http.Request) string {
 	fname = h.stripprefix + fname
 	if strings.HasSuffix(fname, "/") {
 		fname += h.indexname
+	} else if fname == "" {
+		fname = "/" + h.indexname
 	}
 	fname = strings.ReplaceAll(fname, "//", "/")
 	return strings.TrimPrefix(fname, "/")

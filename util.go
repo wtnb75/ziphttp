@@ -2,13 +2,16 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -122,4 +125,79 @@ func ArchiveOffset(archivefile string) (int64, error) {
 		slog.Error("close", "file", archivefile, "error", err)
 	}
 	return offs, err
+}
+
+func fix_link(here string, link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		slog.Error("invalid url", "error", err, "url", link)
+		return link
+	}
+	if u.User.String() != "" {
+		// URL has username:password
+		slog.Debug("url has username:password", "url", u.Redacted())
+		return link
+	}
+	base, err := url.Parse(here)
+	if err != nil {
+		slog.Warn("invalid base url", "error", err, "url", here)
+		return link
+	}
+	new_url := base.ResolveReference(u)
+	if new_url.Scheme == base.Scheme && new_url.Hostname() == base.Hostname() {
+		relpath, err := filepath.Rel(filepath.Dir(base.Path)+"/", new_url.Path)
+		if strings.HasSuffix(new_url.Path, "/") && !strings.HasSuffix(relpath, "/") {
+			relpath += "/"
+		}
+		if err != nil {
+			slog.Warn("filepath.Rel", "error", err, "base", base, "new", new_url)
+			return link
+		}
+		new_url.Host = ""
+		new_url.Scheme = ""
+		new_url.Path = relpath
+		slog.Debug("link change", "base", base, "link", link, "new", new_url)
+		return new_url.String()
+	}
+	slog.Debug("link unchange", "base", base, "link", link, "new", new_url)
+	return link
+}
+
+func process_line(here string, line string) string {
+	link_regex := regexp.MustCompile(`\s*(src|href)\s*=\s*"?([^" >]*)"?`)
+	return link_regex.ReplaceAllStringFunc(line, func(part string) string {
+		match := link_regex.FindStringSubmatch(part)
+		new_link := fix_link(here, match[2])
+		return fmt.Sprintf(" %s=\"%s\"", match[1], new_link)
+	})
+}
+
+func LinkRelative(here string, reader io.Reader, writer io.Writer) error {
+	if !ismatch(strings.ToLower(filepath.Base(here)), []string{"*.html", "*.htm", "*.xml"}) {
+		_, err := io.Copy(writer, reader)
+		return err
+	}
+	slog.Debug("link relative", "here", here)
+	rd := bufio.NewReader(reader)
+	for {
+		line, err := rd.ReadString('\n')
+		if err == io.EOF {
+			_, err = writer.Write([]byte(process_line(here, line)))
+			if err != nil {
+				slog.Error("write(eof)", "line", line)
+				return err
+			}
+			break
+		}
+		if err != nil {
+			slog.Error("readstring", "line", line, "error", err)
+			return err
+		}
+		_, err = writer.Write([]byte(process_line(here, line)))
+		if err != nil {
+			slog.Error("write", "line", line, "error", err)
+			return err
+		}
+	}
+	return nil
 }
