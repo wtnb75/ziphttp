@@ -208,6 +208,8 @@ func (h ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ZipHandler) init2() {
+	h.deflmap = map[string]int{}
+	h.storemap = map[string]int{}
 	for i := 0; i < h.zipfile.Files(); i++ {
 		fi := h.zipfile.File(i)
 		offset, err := fi.DataOffset()
@@ -235,7 +237,7 @@ func (h *ZipHandler) initialize_memory(input []byte) error {
 	return nil
 }
 
-func (h *ZipHandler) initialize(archive string) error {
+func (h *ZipHandler) initialize_file(archive string) error {
 	var err error
 	h.zipfile, err = NewZipFileFile(archive)
 	if err != nil {
@@ -248,6 +250,45 @@ func (h *ZipHandler) initialize(archive string) error {
 func (h *ZipHandler) Close() error {
 	if h.zipfile != nil {
 		return h.zipfile.Close()
+	}
+	return nil
+}
+
+func (h *ZipHandler) initialize(filename string, inmemory bool) error {
+	if inmemory {
+		offs, err := ArchiveOffset(filename)
+		if err != nil {
+			slog.Error("archiveoffset", "file", filename, "error", err)
+			return err
+		}
+		fp, err := os.Open(filename)
+		if err != nil {
+			slog.Error("open file to memory", "file", filename, "error", err)
+			return err
+		}
+		_, err = fp.Seek(offs, io.SeekStart)
+		if err != nil {
+			slog.Error("seek", "file", filename, "error", err)
+			return err
+		}
+		buf, err := io.ReadAll(fp)
+		if err != nil {
+			slog.Error("read file to memory", "file", filename, "error", err)
+			return err
+		}
+		fp.Close()
+		slog.Debug("memory size", "file", filename, "size", len(buf))
+		err = h.initialize_memory(buf)
+		if err != nil {
+			slog.Error("initialize failed", "err", err)
+			return err
+		}
+	} else {
+		err := h.initialize_file(filename)
+		if err != nil {
+			slog.Error("initialize failed", "err", err)
+			return err
+		}
 	}
 	return nil
 }
@@ -274,42 +315,7 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		storemap:    make(map[string]int),
 	}
 
-	archivefile := archiveFilename()
-	if cmd.InMemory {
-		offs, err := ArchiveOffset(archivefile)
-		if err != nil {
-			slog.Error("archiveoffset", "file", archivefile, "error", err)
-			return err
-		}
-		fp, err := os.Open(archivefile)
-		if err != nil {
-			slog.Error("open file to memory", "file", archivefile, "error", err)
-			return err
-		}
-		_, err = fp.Seek(offs, io.SeekStart)
-		if err != nil {
-			slog.Error("seek", "file", archivefile, "error", err)
-			return err
-		}
-		buf, err := io.ReadAll(fp)
-		if err != nil {
-			slog.Error("read file to memory", "file", archivefile, "error", err)
-			return err
-		}
-		fp.Close()
-		slog.Debug("memory size", "file", archivefile, "size", len(buf))
-		err = hdl.initialize_memory(buf)
-		if err != nil {
-			slog.Error("initialize failed", "err", err)
-			return err
-		}
-	} else {
-		err = hdl.initialize(archivefile)
-		if err != nil {
-			slog.Error("initialize failed", "err", err)
-			return err
-		}
-	}
+	hdl.initialize(archiveFilename(), cmd.InMemory)
 	defer hdl.Close()
 	slog.Info("open success", "files", hdl.zipfile.Files(), "deflate", len(hdl.deflmap))
 	rto, err := time.ParseDuration(cmd.ReadTimeout)
