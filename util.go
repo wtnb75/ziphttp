@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -105,6 +107,49 @@ func ispat(head []byte, pat []string) bool {
 }
 
 func ArchiveOffset(archivefile string) (int64, error) {
+	fp, err := os.Open(archivefile)
+	if err != nil {
+		slog.Error("open archive", "name", archivefile, "error", err)
+		return 0, err
+	}
+	defer fp.Close()
+	cur, err := fp.Seek(-512, io.SeekEnd)
+	if err != nil {
+		slog.Error("seek", "name", archivefile, "error", err, "cur", cur)
+		return 0, err
+	}
+
+	// read end of central directory
+	tail := make([]byte, 512)
+	sz, err := fp.Read(tail)
+	if err != nil && err != io.EOF {
+		slog.Error("read(tail)", "name", archivefile, "error", err, "size", sz)
+		return 0, err
+	}
+	idx := bytes.LastIndex(tail[0:sz], []byte{0x50, 0x4b, 0x05, 0x06})
+	if idx == -1 {
+		slog.Error("end of central directory not found", "name", archivefile, "bytes", tail)
+	}
+	cdsize := binary.LittleEndian.Uint32(tail[idx+0xc : idx+0xc+4])
+	cur, err = fp.Seek(-512+int64(idx)-int64(cdsize), io.SeekEnd)
+	if err != nil {
+		slog.Error("seek central directory head", "name", archivefile, "error", err, "cdsize", cdsize, "cur", cur)
+		return 0, err
+	}
+	cdhead := make([]byte, 0x30)
+	_, err = fp.Read(cdhead)
+	if err != nil {
+		slog.Error("read central directory head", "name", archivefile, "error", err, "cdsize", cdsize)
+		return 0, err
+	}
+	if !bytes.HasPrefix(cdhead, []byte{0x50, 0x4b, 0x1, 0x2}) {
+		slog.Error("invalid signature", "signature", cdhead[0:4])
+		return 0, err
+	}
+	return int64(binary.LittleEndian.Uint32(cdhead[0x2a:0x2e])), nil
+}
+
+func ArchiveOffset_Old(archivefile string) (int64, error) {
 	rd0, err := zip.OpenReader(archivefile)
 	if err != nil {
 		slog.Error("open reader", "file", archivefile, "error", err)
@@ -121,7 +166,7 @@ func ArchiveOffset(archivefile string) (int64, error) {
 		return 0, err
 	}
 	hdrlen := int64(len(first.Name) + len(first.Comment) + len(first.Extra) + ZipLocalFileHeaderSize)
-	slog.Debug("first offset", "offset", offs, "header", hdrlen)
+	slog.Debug("first offset", "offset", offs, "header", hdrlen, "name", len(first.Name), "comment", len(first.Comment), "extra", len(first.Extra))
 	if offs > hdrlen {
 		offs -= hdrlen
 	}
