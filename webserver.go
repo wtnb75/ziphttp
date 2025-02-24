@@ -134,8 +134,7 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
 	if etag != "" {
 		w.Header().Add("Etag", etag)
 	}
-	written, err := CopyGzip(w, filestr)
-	if err != nil {
+	if written, err := CopyGzip(w, filestr); err != nil {
 		slog.Error("copygzip", "written", written, "error", err)
 	} else {
 		slog.Debug("written", "written", written)
@@ -164,12 +163,11 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, idx in
 	slog.Debug("normal response", "length", filestr.UncompressedSize64)
 	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
 	w.Header().Add("Content-Length", strconv.FormatUint(filestr.UncompressedSize64, 10))
-	written, err := io.Copy(w, f)
-	if err != nil {
+	if written, err := io.Copy(w, f); err != nil {
 		slog.Error("copy error", "error", err, "written", written)
-		return
+	} else {
+		slog.Debug("copy success", "written", written)
 	}
-	slog.Debug("copy success", "written", written)
 }
 
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -321,8 +319,7 @@ func (h *ZipHandler) initialize(filename string, inmemory bool) error {
 			slog.Error("open file to memory", "file", filename, "error", err)
 			return err
 		}
-		_, err = fp.Seek(offs, io.SeekStart)
-		if err != nil {
+		if _, err = fp.Seek(offs, io.SeekStart); err != nil {
 			slog.Error("seek", "file", filename, "error", err)
 			return err
 		}
@@ -333,14 +330,12 @@ func (h *ZipHandler) initialize(filename string, inmemory bool) error {
 		}
 		fp.Close()
 		slog.Debug("memory size", "file", filename, "size", len(buf))
-		err = h.initialize_memory(buf)
-		if err != nil {
+		if err = h.initialize_memory(buf); err != nil {
 			slog.Error("initialize failed", "err", err)
 			return err
 		}
 	} else {
-		err := h.initialize_file(filename)
-		if err != nil {
+		if err := h.initialize_file(filename); err != nil {
 			slog.Error("initialize failed", "err", err)
 			return err
 		}
@@ -376,8 +371,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		accesslog:   slog.With("type", "accesslog"),
 	}
 
-	err = cmd.handler.initialize(archiveFilename(), cmd.InMemory)
-	if err != nil {
+	if err = cmd.handler.initialize(archiveFilename(), cmd.InMemory); err != nil {
 		slog.Error("initialize failed", "error", err)
 		return err
 	}
@@ -394,12 +388,12 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		return err
 	}
 	for _, hdr := range cmd.Headers {
-		kv := strings.SplitN(hdr, ":", 2)
-		if len(kv) != 2 {
+		if kv := strings.SplitN(hdr, ":", 2); len(kv) != 2 {
 			slog.Error("invalid header spec", "header", hdr)
 			return fmt.Errorf("invalid header: %s", hdr)
+		} else {
+			cmd.handler.headers[kv[0]] = strings.TrimSpace(kv[1])
 		}
-		cmd.handler.headers[kv[0]] = strings.TrimSpace(kv[1])
 	}
 	cmd.server = http.Server{
 		Addr:              cmd.Listen,
