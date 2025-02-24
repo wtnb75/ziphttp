@@ -34,6 +34,7 @@ func TestZipList(t *testing.T) {
 	if err != nil {
 		t.Error("readall")
 	}
+	r.Close()
 	if !strings.Contains(string(data), "D 128mb.txt") {
 		t.Error("not found 128mb", string(data))
 	}

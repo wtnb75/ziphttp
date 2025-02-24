@@ -15,9 +15,14 @@ ziphttp is a lightweight and easy-to-use HTTP server that allows you to serve st
 
 ## Installation
 
-from release
+from release: download binary from [releases](https://github.com/wtnb75/ziphttp/releases)
 
-(TBD)
+```sh
+# export GH_TOKEN=.... <- set your token or run "gh auth login"
+# version=$(gh release list -R wtnb75/ziphttp -L 1 --json name -q '.[].name')
+# gh release download -R wtnb75/ziphttp ${version} -p "*$(uname -s)_$(uname -m)"
+# chmod +x ziphttp_$(uname -s)_$(uname -m)
+```
 
 from source
 
@@ -36,11 +41,73 @@ from docker
 - serve a zipfile on port 8888
     - `ziphttp webserver -f your-zip.zip -l :8888`
 - optimize zip with zopfli compression
-    - `ziphttp zopflizip -f new-zip.zip [directory or file or .zip]...`
+    - `ziphttp zip -f new-zip.zip [directory or file or .zip]...`
 - make single executable binary contains zip and the server
-    - `ziphttp zopflizip -f newserver --self [directory or file or .zip]...`
+    - `ziphttp zip -f newserver --self [directory or file or .zip]...`
 - boot the binary
     - `./newserver webserver --self -l :8888`
 - load zip in-memory. no storage access required after initialize was finished
     - `ziphttp webserver -f your-zip.zip -l :8888 --in-memory`
     - `./newserver webserver --self --in-memory -l :8888`
+
+# CookBook
+
+## hugo
+
+- build static site to public/
+    - `hugo --minify`
+- archive static site to single .zip
+    - `ziphttp zip -f hugo.zip -s public/`
+- serve static site -> http://localhost:3000/
+    - `ziphttp webserver -f hugo.zip`
+- or self-extract .zip and run -> http://localhost:3000/
+    - `ziphttp zip -f hugo.run -s public/ --self`
+    - `./hugo.run webserver --self`
+
+as docker:
+
+```Dockerfile
+FROM alpine:3 AS build
+RUN apk add hugo
+ADD https://github.com/wtnb75/ziphttp/releases/download/v0.0.1/ziphttp_Linux_x86_64 /ziphttp
+RUN chmod 755 /ziphttp
+COPY . /app
+RUN cd /app && hugo --minify && /ziphttp zip --self -f /hugo.run -s public/
+
+FROM scratch
+COPY --from=build /hugo.run /
+EXPOSE 3000
+ENTRYPOINT ["/hugo.run"]
+CMD ["webserver", "--self"]
+```
+
+## docker compose + traefik
+
+```yaml
+services:
+  traefik:
+    image: traefik:v2
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+    - --providers.docker=true
+    - --providers.docker.exposedbydefault=false
+    - --entrypoint.web.address=:80
+    network_mode: host
+  static:   # http://localhost/static/
+    image: ghcr.io/wtnb75/ziphttp:main
+    volumes:
+    - ./path/to/archive.zip:/archive.zip:ro
+    environment:
+      ZIPHTTP_ARCHIVE: /archive.zip
+    command:
+    - /ziphttp
+    - webserver
+    - --addprefix
+    - /static
+    labels:
+      traefik.enable: "true"
+      traefik.http.services.static.loadbalancer.server.port: "3000"
+      traefik.http.routers.static.rule: "PathPrefix(`/static`)"
+      traefik.http.routers.static.entrypoints: web
+```
