@@ -125,8 +125,7 @@ func (h *ZipHandler) filename(r *http.Request) string {
 	return strings.TrimPrefix(fname, "/")
 }
 
-func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
-	filestr := h.zipfile.File(idx)
+func (h *ZipHandler) handle_gzip(w http.ResponseWriter, filestr *zip.File, etag string) {
 	slog.Debug("compressed response", "length", filestr.CompressedSize64, "original", filestr.UncompressedSize64)
 	w.Header().Add("Content-Encoding", "gzip")
 	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
@@ -141,8 +140,7 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, idx int, etag string) {
 	}
 }
 
-func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, idx int, etag string) {
-	filestr := h.zipfile.File(idx)
+func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filestr *zip.File, etag string) {
 	if etag != "" {
 		w.Header().Add("Etag", etag)
 	}
@@ -177,17 +175,32 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			headers := []any{
 				"remote", r.RemoteAddr, "elapsed", time.Since(start),
-				"method", r.Method, "path", r.URL.Redacted(),
-				"status", statuscode,
+				"method", r.Method, "path", r.URL.Path,
+				"status", statuscode, "protocol", r.Proto,
+			}
+			if r.URL.User.Username() != "" {
+				headers = append(headers, "user", r.URL.User.Username())
 			}
 			for k, v := range w.Header() {
 				switch strings.ToLower(k) {
 				case "etag":
 					headers = append(headers, "etag", v[0])
 				case "content-length":
-					headers = append(headers, "length", v[0])
+					if val, err := strconv.Atoi(v[0]); err != nil {
+						headers = append(headers, "length", v[0])
+					} else {
+						headers = append(headers, "length", val)
+					}
 				case "content-encoding":
 					headers = append(headers, "encoding", v[0])
+				case "content-type":
+					headers = append(headers, "content-type", v[0])
+				case "last-modified":
+					if ts, err := time.Parse(http.TimeFormat, v[0]); err != nil {
+						headers = append(headers, "last-modified", v[0])
+					} else {
+						headers = append(headers, "last-modified", ts)
+					}
 				}
 			}
 			for k, v := range r.Header {
@@ -196,6 +209,12 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					headers = append(headers, strings.TrimPrefix(strings.ToLower(k), "x-"), v[0])
 				case "forwarded":
 					headers = append(headers, "forwarded", v[0])
+				case "user-agent":
+					headers = append(headers, "user-agent", v[0])
+				case "if-none-match":
+					headers = append(headers, "if-none-match", v[0])
+				case "referer":
+					headers = append(headers, "referer", v[0])
 				}
 			}
 			h.accesslog.Info(
@@ -212,21 +231,24 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("name", "uri", r.URL.Path, "name", fname)
 	if has_gzip {
 		if idx, ok := h.deflmap[fname]; ok {
-			if h.zipfile.File(idx).Flags&0x1 == 1 {
+			fi := h.zipfile.File(idx)
+			if fi.Flags&0x1 == 1 {
 				// encrypted
-				slog.Warn("encrypted", "name", fname, "flag", h.zipfile.File(idx).Flags)
+				slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
 			}
 			// fast path
-			etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 			for k, v := range h.headers {
 				w.Header().Set(k, v)
 			}
 			if r.Header.Get("If-None-Match") == etag {
 				statuscode = http.StatusNotModified
+				w.Header().Add("Etag", etag)
+				w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 				w.WriteHeader(statuscode)
 				return
 			}
-			h.handle_gzip(w, idx, etag)
+			h.handle_gzip(w, fi, etag)
 			return
 		}
 		// pass through
@@ -237,20 +259,23 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		idx, ok = h.storemap[fname]
 	}
 	if ok {
-		if h.zipfile.File(idx).Flags&0x1 == 1 {
+		fi := h.zipfile.File(idx)
+		if fi.Flags&0x1 == 1 {
 			// encrypted
-			slog.Warn("encrypted", "name", fname, "flag", h.zipfile.File(idx).Flags)
+			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
 		}
-		etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 		for k, v := range h.headers {
 			w.Header().Set(k, v)
 		}
 		if r.Header.Get("If-None-Match") == etag {
 			statuscode = http.StatusNotModified
+			w.Header().Add("Etag", etag)
+			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 			w.WriteHeader(statuscode)
 			return
 		}
-		h.handle_normal(w, r.URL.Path, idx, etag)
+		h.handle_normal(w, r.URL.Path, fi, etag)
 		return
 	}
 	statuscode = http.StatusNotFound
