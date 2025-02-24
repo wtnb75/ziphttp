@@ -1,3 +1,5 @@
+![CI status](https://github.com/wtnb75/ziphttp/actions/workflows/golang.yml/badge.svg)
+
 # ziphttp: A simple HTTP server for serving files from a ZIP archive
 
 ziphttp is a lightweight and easy-to-use HTTP server that allows you to serve static files from a ZIP archive over the internet. It's perfect for sharing files without setting up a full web server.
