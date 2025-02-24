@@ -97,6 +97,7 @@ type ZipHandler struct {
 	deflmap     map[string]int
 	storemap    map[string]int
 	rwlock      sync.RWMutex
+	accesslog   *slog.Logger
 }
 
 func (h *ZipHandler) accept_encoding(r *http.Request) ([]string, bool) {
@@ -172,6 +173,35 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, idx in
 }
 
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	statuscode := http.StatusOK
+	start := time.Now()
+	defer func() {
+		headers := []any{
+			"remote", r.RemoteAddr, "elapsed", time.Since(start),
+			"method", r.Method, "path", r.URL.Redacted(),
+			"status", statuscode,
+		}
+		for k, v := range w.Header() {
+			switch strings.ToLower(k) {
+			case "etag":
+				headers = append(headers, "etag", v[0])
+			case "content-length":
+				headers = append(headers, "length", v[0])
+			case "content-encoding":
+				headers = append(headers, "encoding", v[0])
+			}
+		}
+		for k, v := range r.Header {
+			switch strings.ToLower(k) {
+			case "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto":
+				headers = append(headers, strings.TrimPrefix(strings.ToLower(k), "x-"), v[0])
+			case "forwarded":
+				headers = append(headers, "forwarded", v[0])
+			}
+		}
+		h.accesslog.Info(
+			http.StatusText(statuscode), headers...)
+	}()
 	h.rwlock.RLock()
 	defer h.rwlock.RUnlock()
 	encodings, has_gzip := h.accept_encoding(r)
@@ -192,7 +222,8 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set(k, v)
 			}
 			if r.Header.Get("If-None-Match") == etag {
-				w.WriteHeader(http.StatusNotModified)
+				statuscode = http.StatusNotModified
+				w.WriteHeader(statuscode)
 				return
 			}
 			h.handle_gzip(w, idx, etag)
@@ -215,13 +246,15 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(k, v)
 		}
 		if r.Header.Get("If-None-Match") == etag {
-			w.WriteHeader(http.StatusNotModified)
+			statuscode = http.StatusNotModified
+			w.WriteHeader(statuscode)
 			return
 		}
 		h.handle_normal(w, r.URL.Path, idx, etag)
 		return
 	}
-	w.WriteHeader(http.StatusNotFound)
+	statuscode = http.StatusNotFound
+	w.WriteHeader(statuscode)
 	fmt.Fprint(w, "not found")
 }
 
@@ -338,6 +371,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 		headers:     make(map[string]string),
+		accesslog:   slog.With("type", "accesslog"),
 	}
 
 	err = cmd.handler.initialize(archiveFilename(), cmd.InMemory)
