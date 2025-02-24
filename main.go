@@ -79,6 +79,7 @@ func main() {
 			os.Exit(0)
 		}
 		slog.Error("error exit", "error", err)
+		parser.WriteHelp(os.Stdout)
 		os.Exit(1)
 	}
 }
