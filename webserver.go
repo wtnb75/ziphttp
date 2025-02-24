@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 type ZipFile interface {
@@ -91,6 +93,7 @@ type ZipHandler struct {
 	stripprefix string
 	addprefix   string
 	indexname   string
+	headers     map[string]string
 	deflmap     map[string]int
 	storemap    map[string]int
 	rwlock      sync.RWMutex
@@ -185,6 +188,9 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			// fast path
 			etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+			for k, v := range h.headers {
+				w.Header().Set(k, v)
+			}
 			if r.Header.Get("If-None-Match") == etag {
 				w.WriteHeader(http.StatusNotModified)
 				return
@@ -205,6 +211,9 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("encrypted", "name", fname, "flag", h.zipfile.File(idx).Flags)
 		}
 		etag := "W/" + strconv.FormatUint(uint64(h.zipfile.File(idx).CRC32), 16)
+		for k, v := range h.headers {
+			w.Header().Set(k, v)
+		}
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -305,13 +314,15 @@ func (h *ZipHandler) initialize(filename string, inmemory bool) error {
 }
 
 type WebServer struct {
-	Listen            string `short:"l" long:"listen" default:":3000" description:"listen address:port"`
-	IndexFilename     string `long:"index" description:"index filename" default:"index.html"`
-	StripPrefix       string `long:"stripprefix" description:"strip prefix from archive"`
-	AddPrefix         string `long:"addprefix" description:"add prefix to URL path"`
-	ReadTimeout       string `long:"read-timeout" default:"10s"`
-	ReadHeaderTimeout string `long:"read-header-timeout" default:"10s"`
-	InMemory          bool   `long:"in-memory" description:"load zip to memory"`
+	Listen            string   `short:"l" long:"listen" default:":3000" description:"listen address:port"`
+	IndexFilename     string   `long:"index" description:"index filename" default:"index.html"`
+	StripPrefix       string   `long:"stripprefix" description:"strip prefix from archive"`
+	AddPrefix         string   `long:"addprefix" description:"add prefix to URL path"`
+	ReadTimeout       string   `long:"read-timeout" default:"10s"`
+	ReadHeaderTimeout string   `long:"read-header-timeout" default:"10s"`
+	InMemory          bool     `long:"in-memory" description:"load zip to memory"`
+	Headers           []string `short:"H" long:"header" description:"custom response headers"`
+	AutoReload        bool     `long:"autoreload" description:"detect zip file change and reload"`
 	server            http.Server
 	handler           ZipHandler
 }
@@ -326,6 +337,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		indexname:   cmd.IndexFilename,
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
+		headers:     make(map[string]string),
 	}
 
 	err = cmd.handler.initialize(archiveFilename(), cmd.InMemory)
@@ -344,6 +356,14 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	if err != nil {
 		slog.Error("read header timeout expression", "error", err)
 		return err
+	}
+	for _, hdr := range cmd.Headers {
+		kv := strings.SplitN(hdr, ":", 2)
+		if len(kv) != 2 {
+			slog.Error("invalid header spec", "header", hdr)
+			return fmt.Errorf("invalid header: %s", hdr)
+		}
+		cmd.handler.headers[kv[0]] = strings.TrimSpace(kv[1])
 	}
 	cmd.server = http.Server{
 		Addr:              cmd.Listen,
@@ -376,6 +396,43 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 			}
 		}
 	}()
+
+	if cmd.AutoReload {
+		wt, err := fsnotify.NewWatcher()
+		if err != nil {
+			slog.Error("watcher", "error", err)
+		}
+		defer wt.Close()
+		go func() {
+			for {
+				select {
+				case event, ok := <-wt.Events:
+					if !ok {
+						slog.Error("cannot process event", "event", event)
+						return
+					}
+					slog.Info("got watcher event", "event", event)
+					if event.Has(fsnotify.Write) {
+						slog.Info("modified", "name", event.Name)
+						if err = cmd.Reload(); err != nil {
+							slog.Error("reload error", "error", err)
+						}
+					}
+				case err, ok := <-wt.Errors:
+					if !ok {
+						slog.Error("cannot process error", "error", err)
+						return
+					}
+					slog.Info("got watcher error", "error", err)
+				}
+			}
+		}()
+
+		if err = wt.Add(archiveFilename()); err != nil {
+			slog.Error("watcher add", "error", err)
+			return err
+		}
+	}
 
 	slog.Info("server starting", "listen", cmd.server.Addr, "pid", os.Getpid())
 	err = cmd.server.ListenAndServe()
