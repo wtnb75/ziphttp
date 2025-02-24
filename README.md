@@ -41,9 +41,9 @@ from docker
 - serve a zipfile on port 8888
     - `ziphttp webserver -f your-zip.zip -l :8888`
 - optimize zip with zopfli compression
-    - `ziphttp zopflizip -f new-zip.zip [directory or file or .zip]...`
+    - `ziphttp zip -f new-zip.zip [directory or file or .zip]...`
 - make single executable binary contains zip and the server
-    - `ziphttp zopflizip -f newserver --self [directory or file or .zip]...`
+    - `ziphttp zip -f newserver --self [directory or file or .zip]...`
 - boot the binary
     - `./newserver webserver --self -l :8888`
 - load zip in-memory. no storage access required after initialize was finished
@@ -57,11 +57,11 @@ from docker
 - build static site to public/
     - `hugo --minify`
 - archive static site to single .zip
-    - `ziphttp zopflizip -f hugo.zip -s public/`
+    - `ziphttp zip -f hugo.zip -s public/`
 - serve static site -> http://localhost:3000/
     - `ziphttp webserver -f hugo.zip`
 - or self-extract .zip and run -> http://localhost:3000/
-    - `ziphttp zopflizip -f hugo.run -s public/ --self`
+    - `ziphttp zip -f hugo.run -s public/ --self`
     - `./hugo.run webserver --self`
 
 as docker:
@@ -72,7 +72,7 @@ RUN apk add hugo
 ADD https://github.com/wtnb75/ziphttp/releases/download/v0.0.1/ziphttp_Linux_x86_64 /ziphttp
 RUN chmod 755 /ziphttp
 COPY . /app
-RUN cd /app && hugo --minify && /ziphttp zopflizip --self -f /hugo.run -s public/
+RUN cd /app && hugo --minify && /ziphttp zip --self -f /hugo.run -s public/
 
 FROM scratch
 COPY --from=build /hugo.run /

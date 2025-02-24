@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"io/fs"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"archive/zip"
@@ -89,6 +93,7 @@ type ZipHandler struct {
 	indexname   string
 	deflmap     map[string]int
 	storemap    map[string]int
+	rwlock      sync.RWMutex
 }
 
 func (h *ZipHandler) accept_encoding(r *http.Request) ([]string, bool) {
@@ -163,7 +168,9 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, idx in
 	slog.Debug("copy success", "written", written)
 }
 
-func (h ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.rwlock.RLock()
+	defer h.rwlock.RUnlock()
 	encodings, has_gzip := h.accept_encoding(r)
 	if has_gzip {
 		slog.Debug("gzip encoding supported", "header", encodings)
@@ -257,6 +264,8 @@ func (h *ZipHandler) Close() error {
 }
 
 func (h *ZipHandler) initialize(filename string, inmemory bool) error {
+	h.rwlock.Lock()
+	defer h.rwlock.Unlock()
 	if inmemory {
 		offs, err := ArchiveOffset(filename)
 		if err != nil {
@@ -295,7 +304,7 @@ func (h *ZipHandler) initialize(filename string, inmemory bool) error {
 	return nil
 }
 
-type webserver struct {
+type WebServer struct {
 	Listen            string `short:"l" long:"listen" default:":3000" description:"listen address:port"`
 	IndexFilename     string `long:"index" description:"index filename" default:"index.html"`
 	StripPrefix       string `long:"stripprefix" description:"strip prefix from archive"`
@@ -303,12 +312,14 @@ type webserver struct {
 	ReadTimeout       string `long:"read-timeout" default:"10s"`
 	ReadHeaderTimeout string `long:"read-header-timeout" default:"10s"`
 	InMemory          bool   `long:"in-memory" description:"load zip to memory"`
+	server            http.Server
+	handler           ZipHandler
 }
 
-func (cmd *webserver) Execute(args []string) (err error) {
+func (cmd *WebServer) Execute(args []string) (err error) {
 	init_log()
 	slog.Info("args", "args", args)
-	hdl := ZipHandler{
+	cmd.handler = ZipHandler{
 		zipfile:     nil,
 		stripprefix: cmd.StripPrefix,
 		addprefix:   cmd.AddPrefix,
@@ -317,13 +328,13 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		storemap:    make(map[string]int),
 	}
 
-	err = hdl.initialize(archiveFilename(), cmd.InMemory)
+	err = cmd.handler.initialize(archiveFilename(), cmd.InMemory)
 	if err != nil {
 		slog.Error("initialize failed", "error", err)
 		return err
 	}
-	defer hdl.Close()
-	slog.Info("open success", "files", hdl.zipfile.Files(), "deflate", len(hdl.deflmap))
+	defer cmd.handler.Close()
+	slog.Info("open success", "files", cmd.handler.zipfile.Files(), "deflate", len(cmd.handler.deflmap))
 	rto, err := time.ParseDuration(cmd.ReadTimeout)
 	if err != nil {
 		slog.Error("read timeout expression", "error", err)
@@ -334,18 +345,54 @@ func (cmd *webserver) Execute(args []string) (err error) {
 		slog.Error("read header timeout expression", "error", err)
 		return err
 	}
-	server := http.Server{
+	cmd.server = http.Server{
 		Addr:              cmd.Listen,
 		Handler:           nil,
 		ReadTimeout:       rto,
 		ReadHeaderTimeout: rhto,
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo),
 	}
-	http.Handle("/", hdl)
-	err = server.ListenAndServe()
-	if err != nil {
+	http.Handle("/", &cmd.handler)
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	go func() {
+		var err error
+		for {
+			sig := <-sigs
+			slog.Info("caught signal", "signal", sig)
+			switch sig {
+			case syscall.SIGHUP:
+				if err = cmd.Reload(); err != nil {
+					slog.Error("reload failed", "error", err)
+					return
+				}
+			case syscall.SIGINT, syscall.SIGTERM:
+				if err = cmd.Shutdown(); err != nil {
+					slog.Error("terminate failed", "error", err)
+				}
+				return
+			}
+		}
+	}()
+
+	slog.Info("server starting", "listen", cmd.server.Addr, "pid", os.Getpid())
+	err = cmd.server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
 		slog.Error("listen error", "error", err)
 		return err
 	}
+	slog.Info("server closed", "msg", err)
 	return nil
+}
+
+func (cmd *WebServer) Shutdown() error {
+	slog.Info("graceful shutdown")
+	return cmd.server.Shutdown(context.TODO())
+}
+
+func (cmd *WebServer) Reload() error {
+	slog.Info("reloading archive", "name", archiveFilename(), "inmemory", cmd.InMemory)
+	return cmd.handler.initialize(archiveFilename(), cmd.InMemory)
 }

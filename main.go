@@ -41,38 +41,29 @@ func init_log() {
 	}
 }
 
+type SubCommand struct {
+	Name  string
+	Short string
+	Long  string
+	Data  interface{}
+}
+
 func main() {
 	var err error
-	var webserv webserver
-	var ziplist ZipList
-	var ziptogzip ZiptoGzip
-	var zopflicmd ZopfliZip
-	var linkcmd LinkCommand
+	commands := []SubCommand{
+		{Name: "webserver", Short: "boot webserver", Long: "boot zipweb", Data: &WebServer{}},
+		{Name: "ziplist", Short: "list zip names", Long: "list zip names", Data: &ZipList{}},
+		{Name: "zip", Short: "create zip", Long: "create new archive from dir/file/zip", Data: &ZopfliZip{}},
+		{Name: "zip2gzip", Short: "extract from zip", Long: "extract files from zip without decompress", Data: &ZiptoGzip{}},
+		{Name: "testlink", Short: "test link rewrite", Long: "test rewrite link to relative", Data: &LinkCommand{}},
+	}
 	parser := flags.NewParser(&globalOption, flags.Default)
-	_, err = parser.AddCommand("webserver", "boot webserver", "boot zipweb", &webserv)
-	if err != nil {
-		slog.Error("addcommand webserver", "error", err)
-		panic(err)
-	}
-	_, err = parser.AddCommand("ziplist", "zip list deflate", "zip list deflate", &ziplist)
-	if err != nil {
-		slog.Error("addcommand ziplist", "error", err)
-		panic(err)
-	}
-	_, err = parser.AddCommand("ziptogzip", "zip list deflate", "zip list deflate", &ziptogzip)
-	if err != nil {
-		slog.Error("addcommand ziptogzip", "error", err)
-		panic(err)
-	}
-	_, err = parser.AddCommand("zopflizip", "zopfli zip", "zopfli zip archiver", &zopflicmd)
-	if err != nil {
-		slog.Error("addcommand zopflizip", "error", err)
-		panic(err)
-	}
-	_, err = parser.AddCommand("relativelink", "convert link", "make link relative", &linkcmd)
-	if err != nil {
-		slog.Error("addcommand relativelink", "error", err)
-		panic(err)
+	for _, cmd := range commands {
+		_, err = parser.AddCommand(cmd.Name, cmd.Short, cmd.Long, cmd.Data)
+		if err != nil {
+			slog.Error(cmd.Name, "error", err)
+			panic(err)
+		}
 	}
 	if _, err := parser.Parse(); err != nil {
 		if fe, ok := err.(*flags.Error); ok && fe.Type == flags.ErrHelp {
