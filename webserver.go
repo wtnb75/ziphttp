@@ -168,6 +168,20 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filest
 	}
 }
 
+func conditional(r *http.Request, etag string, fi *zip.File) bool {
+	ifnonematch := r.Header.Get("If-None-Match")
+	if ifnonematch == etag {
+		return true
+	}
+	if ifnonematch == "" {
+		ifmodified, err := time.Parse(http.TimeFormat, r.Header.Get("If-Modified-Since"))
+		if err == nil {
+			return !fi.Modified.After(ifmodified)
+		}
+	}
+	return false
+}
+
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	statuscode := http.StatusOK
 	if h.accesslog != nil {
@@ -231,7 +245,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for k, v := range h.headers {
 				w.Header().Set(k, v)
 			}
-			if r.Header.Get("If-None-Match") == etag {
+			if conditional(r, etag, fi) {
 				statuscode = http.StatusNotModified
 				w.Header().Add("Etag", etag)
 				w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
@@ -258,7 +272,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for k, v := range h.headers {
 			w.Header().Set(k, v)
 		}
-		if r.Header.Get("If-None-Match") == etag {
+		if conditional(r, etag, fi) {
 			statuscode = http.StatusNotModified
 			w.Header().Add("Etag", etag)
 			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
