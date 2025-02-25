@@ -40,7 +40,7 @@ jobs:
     - uses: goreleaser/goreleaser-action@v6
       with:
         distribution: goreleaser
-        args: release --snapshot --clean --skip archive
+        args: release --snapshot --clean --skip archive -f .goreleaser-branch.yaml
     - name: push images
       run: |
         docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-arm64

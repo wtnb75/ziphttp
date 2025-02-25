@@ -85,7 +85,7 @@ archives:
         formats: ['zip']
 
 snapshot:
-  version_template: "{{ .Tag }}"
+  version_template: "{{ .Branch }}"
 
 changelog:
   disable: true
