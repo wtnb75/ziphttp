@@ -9,7 +9,7 @@ ziphttp is a lightweight and easy-to-use HTTP server that allows you to serve st
 - **Serves files from a ZIP archive**: ziphttp extracts files from a ZIP archive and serves them via HTTP.
 - **Easy to use**: Simply provide the path to your ZIP file, and ziphttp will start serving it on a specified port.
 - **Supports multiple files and directories**: You can access individual files within the ZIP archive.
-- **Cross-platform**: Works on Windows, macOS, and Linux.
+- **Cross-platform**: Works on Windows, macOS, Linux, and WASI.
 - **Serves compressed files with lowest CPU load**: ziphttp send contents without decompress stream if it is acceptable.
 - **Small footprint**: size of container image is only <10MB. serving files are also compressed as you can see.
 - **Make single executable**: ziphttp can create self-extract zip with ziphttp itself. generated binary runs webserver using its own contents.
