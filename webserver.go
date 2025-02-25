@@ -168,6 +168,20 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filest
 	}
 }
 
+func conditional(r *http.Request, etag string, fi *zip.File) bool {
+	ifnonematch := r.Header.Get("If-None-Match")
+	if ifnonematch == etag {
+		return true
+	}
+	if ifnonematch == "" {
+		ifmodified, err := time.Parse(http.TimeFormat, r.Header.Get("If-Modified-Since"))
+		if err == nil {
+			return !fi.Modified.After(ifmodified)
+		}
+	}
+	return false
+}
+
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	statuscode := http.StatusOK
 	if h.accesslog != nil {
@@ -183,18 +197,14 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			for k, v := range w.Header() {
 				switch strings.ToLower(k) {
-				case "etag":
-					headers = append(headers, "etag", v[0])
+				case "etag", "content-type", "content-encoding":
+					headers = append(headers, strings.ToLower(k), v[0])
 				case "content-length":
 					if val, err := strconv.Atoi(v[0]); err != nil {
 						headers = append(headers, "length", v[0])
 					} else {
 						headers = append(headers, "length", val)
 					}
-				case "content-encoding":
-					headers = append(headers, "encoding", v[0])
-				case "content-type":
-					headers = append(headers, "content-type", v[0])
 				case "last-modified":
 					if ts, err := time.Parse(http.TimeFormat, v[0]); err != nil {
 						headers = append(headers, "last-modified", v[0])
@@ -207,14 +217,8 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				switch strings.ToLower(k) {
 				case "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto":
 					headers = append(headers, strings.TrimPrefix(strings.ToLower(k), "x-"), v[0])
-				case "forwarded":
-					headers = append(headers, "forwarded", v[0])
-				case "user-agent":
-					headers = append(headers, "user-agent", v[0])
-				case "if-none-match":
-					headers = append(headers, "if-none-match", v[0])
-				case "referer":
-					headers = append(headers, "referer", v[0])
+				case "forwarded", "user-agent", "if-none-match", "referer":
+					headers = append(headers, strings.ToLower(k), v[0])
 				}
 			}
 			h.accesslog.Info(
@@ -241,7 +245,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for k, v := range h.headers {
 				w.Header().Set(k, v)
 			}
-			if r.Header.Get("If-None-Match") == etag {
+			if conditional(r, etag, fi) {
 				statuscode = http.StatusNotModified
 				w.Header().Add("Etag", etag)
 				w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
@@ -268,7 +272,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for k, v := range h.headers {
 			w.Header().Set(k, v)
 		}
-		if r.Header.Get("If-None-Match") == etag {
+		if conditional(r, etag, fi) {
 			statuscode = http.StatusNotModified
 			w.Header().Add("Etag", etag)
 			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
