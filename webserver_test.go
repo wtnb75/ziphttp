@@ -173,6 +173,11 @@ func TestConditional(t *testing.T) {
 	r_none := &http.Request{
 		Header: http.Header{},
 	}
+	r_modified_invalid := &http.Request{
+		Header: http.Header{
+			"If-Modified-Since": []string{"invalid-date"},
+		},
+	}
 
 	fi_old := &zip.File{
 		FileHeader: zip.FileHeader{
@@ -238,6 +243,13 @@ func TestConditional(t *testing.T) {
 		{r_none, etag_false, fi_new, false},
 		{r_none, etag_true, fi_eq, false},
 		{r_none, etag_false, fi_eq, false},
+		// invalid date -> false
+		{r_modified_invalid, etag_true, fi_old, false},
+		{r_modified_invalid, etag_false, fi_old, false},
+		{r_modified_invalid, etag_true, fi_new, false},
+		{r_modified_invalid, etag_false, fi_new, false},
+		{r_modified_invalid, etag_true, fi_eq, false},
+		{r_modified_invalid, etag_false, fi_eq, false},
 	}
 	for idx, t0 := range tdata {
 		if conditional(t0.req, t0.etag, t0.fl) != t0.expected {
