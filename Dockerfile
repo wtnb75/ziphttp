@@ -1,3 +1,4 @@
 FROM scratch
-COPY ziphttp /
+ARG EXT=
+COPY ziphttp${EXT} /ziphttp
 ENTRYPOINT ["/ziphttp"]

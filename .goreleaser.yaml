@@ -13,9 +13,11 @@ builds:
       - linux
       - windows
       - darwin
+      - wasip1
     goarch:
       - amd64
       - arm64
+      - wasm
 
 dockers:
   - image_templates:
@@ -42,16 +44,32 @@ dockers:
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
       - "--label=org.opencontainers.image.version={{ .Version }}"
     goarch: arm64
+  - image_templates:
+      - "ghcr.io/wtnb75/{{ .ProjectName }}:latest-wasi"
+      - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-wasi"
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=wasi/wasm"
+      - "--build-arg=EXT=.wasm"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    goarch: wasm
+    goos: wasip1
 
 docker_manifests:
   - name_template: "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}"
     image_templates:
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-arm64"
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-amd64"
+       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Tag }}-wasi"
   - name_template: "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}"
     image_templates:
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-arm64"
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-amd64"
+       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-wasi"
 
 archives:
   - formats: ['binary']
