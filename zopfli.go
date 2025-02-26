@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/xml"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -53,7 +54,18 @@ func filtercopy(dst io.Writer, src io.Reader, baseurl string) (int64, error) {
 	return io.Copy(dst, src)
 }
 
-func archive_single(path string, archivepath string, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
+type ZopfliZip struct {
+	StripRoot bool     `short:"s" long:"strip-root" description:"strip root path"`
+	Exclude   []string `short:"x" long:"exclude" description:"exclude files"`
+	Stored    []string `short:"n" long:"stored" description:"non compress patterns"`
+	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
+	UseNormal bool     `long:"no-zopfli" description:"do not use zopfli compress"`
+	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
+	IndexFile string   `long:"index" default:"index.html"`
+	SiteMap   bool     `long:"sitemap" description:"generate sitemap.xml"`
+}
+
+func (cmd *ZopfliZip) archive_single(path string, archivepath string, w *zip.Writer, sitemap *SiteMapRoot) error {
 	hdr := zip.FileHeader{
 		Name:   archivepath,
 		Method: zip.Deflate,
@@ -70,7 +82,7 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 		slog.Error("OpenFile", "path", path, "error", err)
 		return err
 	}
-	if st.Size() < int64(minsize) || ismatch(path, store_pat) {
+	if st.Size() < int64(cmd.MinSize) || ismatch(path, cmd.Stored) {
 		hdr.Method = zip.Store
 	} else {
 		buf := make([]byte, 512)
@@ -85,7 +97,7 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 			return err
 		}
 		slog.Debug("read head", "length", buflen)
-		if ispat(buf[0:buflen], store_pat) {
+		if ispat(buf[0:buflen], cmd.Stored) {
 			slog.Debug("not deflate", "name", archivepath)
 			hdr.Method = zip.Store
 		}
@@ -95,7 +107,7 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 		slog.Error("zipCreate", "path", archivepath, "error", err)
 		return err
 	}
-	written, err := filtercopy(fp, rd, baseurl)
+	written, err := filtercopy(fp, rd, cmd.BaseURL)
 	if err != nil {
 		slog.Error("Copy", "path", path, "archivepath", archivepath, "error", err, "written", written)
 		return err
@@ -109,23 +121,26 @@ func archive_single(path string, archivepath string, store_pat []string, minsize
 		slog.Error("zipFlush", "path", path, "archivepath", archivepath, "error", err)
 		return err
 	}
+	if cmd.SiteMap {
+		sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: hdr})
+	}
 	return nil
 }
 
-func from_dir(root string, striproot bool, exclude []string, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
-	slog.Debug("from_dir", "exclude", exclude, "store", store_pat)
+func (cmd *ZopfliZip) from_dir(root string, w *zip.Writer, sitemap *SiteMapRoot) error {
+	slog.Debug("from_dir", "exclude", cmd.Exclude, "store", cmd.Stored)
 	return filepath.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
 		if info.IsDir() {
 			slog.Debug("isdir", "root", root, "path", path)
 			return nil
 		}
-		if ismatch(path, exclude) {
-			slog.Debug("exclude-match", "path", path, "exclude", exclude)
+		if ismatch(path, cmd.Exclude) {
+			slog.Debug("exclude-match", "path", path, "exclude", cmd.Exclude)
 			return nil
 		}
 		slog.Info("walk", "root", root, "path", path, "type", info.Type(), "name", info.Name(), "error", err)
 		var archivepath string
-		if striproot {
+		if cmd.StripRoot {
 			archivepath, err = filepath.Rel(root, path)
 			if err != nil {
 				slog.Error("Relpath", "root", root, "path", path, "error", err)
@@ -134,12 +149,7 @@ func from_dir(root string, striproot bool, exclude []string, store_pat []string,
 		} else {
 			archivepath = path
 		}
-		new_baseurl := baseurl
-		if baseurl != "" {
-			new_baseurl, _ = url.JoinPath(baseurl, archivepath)
-			slog.Debug("baseurl", "orig", baseurl, "new", new_baseurl, "archive", archivepath, "root", root, "path", path)
-		}
-		if err = archive_single(path, archivepath, store_pat, minsize, new_baseurl, w); err != nil {
+		if err = cmd.archive_single(path, archivepath, w, sitemap); err != nil {
 			slog.Error("archive", "root", root, "path", path, "archivepath", archivepath, "error", err)
 			return err
 		}
@@ -147,24 +157,19 @@ func from_dir(root string, striproot bool, exclude []string, store_pat []string,
 	})
 }
 
-func from_file(root string, striproot bool, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
-	slog.Debug("from_file", "store", store_pat)
+func (cmd *ZopfliZip) from_file(root string, w *zip.Writer, sitemap *SiteMapRoot) error {
+	slog.Debug("from_file", "store", cmd.Stored)
 	var archivepath string
-	if striproot {
+	if cmd.StripRoot {
 		archivepath = filepath.Base(root)
 	} else {
 		archivepath = root
 	}
-	new_baseurl := baseurl
-	if baseurl != "" {
-		new_baseurl, _ = url.JoinPath(baseurl, archivepath)
-		slog.Debug("baseurl", "orig", baseurl, "new", new_baseurl, "archive", archivepath, "root", root)
-	}
-	return archive_single(root, archivepath, store_pat, minsize, new_baseurl, w)
+	return cmd.archive_single(root, archivepath, w, sitemap)
 }
 
-func from_zip(root string, exclude []string, store_pat []string, minsize uint, baseurl string, w *zip.Writer) error {
-	slog.Debug("from_zip", "exclude", exclude, "store", store_pat)
+func (cmd *ZopfliZip) from_zip(root string, w *zip.Writer, sitemap *SiteMapRoot) error {
+	slog.Debug("from_zip", "exclude", cmd.Exclude, "store", cmd.Stored)
 	zf, err := zip.OpenReader(root)
 	if err != nil {
 		slog.Error("openreader", "root", root, "error", err)
@@ -172,7 +177,7 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, b
 	}
 	defer zf.Close()
 	for _, f := range zf.File {
-		if ismatch(f.Name, exclude) {
+		if ismatch(f.Name, cmd.Exclude) {
 			continue
 		}
 		if f.FileInfo().IsDir() {
@@ -180,7 +185,7 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, b
 		}
 		slog.Info("walk(zip)", "name", f.Name, "fileinfo", f.FileInfo())
 		method := zip.Deflate
-		if f.UncompressedSize64 < uint64(minsize) || ismatch(f.Name, store_pat) {
+		if f.UncompressedSize64 < uint64(cmd.MinSize) || ismatch(f.Name, cmd.Stored) {
 			method = zip.Store
 		} else {
 			rd0, err := f.Open()
@@ -194,7 +199,7 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, b
 				slog.Error("ReadZip", "root", root, "file", f.Name, "error", err, "buflen", buflen)
 				return err
 			}
-			if ispat(buf[0:buflen], store_pat) {
+			if ispat(buf[0:buflen], cmd.Stored) {
 				slog.Debug("store", "name", f.Name)
 				method = zip.Store
 			}
@@ -218,9 +223,9 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, b
 			slog.Error("CreateHeader", "root", root, "file", f.Name, "error", err)
 			return err
 		}
-		new_url := baseurl
-		if baseurl != "" {
-			new_url, _ = url.JoinPath(baseurl, f.Name)
+		new_url := cmd.BaseURL
+		if cmd.BaseURL != "" {
+			new_url, _ = url.JoinPath(cmd.BaseURL, f.Name)
 		}
 		written, err := filtercopy(wr, rd, new_url)
 		if err != nil {
@@ -234,18 +239,11 @@ func from_zip(root string, exclude []string, store_pat []string, minsize uint, b
 		}
 		slog.Debug("copied", "root", root, "file", f.Name, "written", written)
 		w.Flush()
+		if cmd.SiteMap {
+			sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: fh})
+		}
 	}
 	return nil
-}
-
-type ZopfliZip struct {
-	StripRoot bool     `short:"s" long:"strip-root" description:"strip root path"`
-	Exclude   []string `short:"x" long:"exclude" description:"exclude files"`
-	Stored    []string `short:"n" long:"stored" description:"non compress patterns"`
-	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
-	UseNormal bool     `long:"no-zopfli" description:"do not use zopfli compress"`
-	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
-	IndexFile string   `long:"index" default:"index.html"`
 }
 
 func (cmd *ZopfliZip) Execute(args []string) (err error) {
@@ -269,26 +267,26 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 	}
 	var written int64
 	if globalOption.Self {
-		self_exc, err := os.Executable()
+		cmd_exc, err := os.Executable()
 		if err != nil {
-			slog.Error("self", "error", err)
+			slog.Error("cmd", "error", err)
 			return err
 		}
-		self_fp, err := os.Open(self_exc)
+		cmd_fp, err := os.Open(cmd_exc)
 		if err != nil {
-			slog.Error("self open", "name", self_exc, "error", err)
+			slog.Error("cmd open", "name", cmd_exc, "error", err)
 			return err
 		}
-		defer self_fp.Close()
-		written, err = io.Copy(ofp, self_fp)
+		defer cmd_fp.Close()
+		written, err = io.Copy(ofp, cmd_fp)
 		if err != nil {
-			slog.Error("self copy", "name", self_exc, "dest", globalOption.Archive, "error", err, "written", written)
+			slog.Error("cmd copy", "name", cmd_exc, "dest", globalOption.Archive, "error", err, "written", written)
 			return err
 		}
 		slog.Debug("copy", "written", written)
 		err = ofp.Sync()
 		if err != nil {
-			slog.Error("sync", "name", self_exc, "error", err)
+			slog.Error("sync", "name", cmd_exc, "error", err)
 		}
 	}
 	zipfile := zip.NewWriter(ofp)
@@ -305,6 +303,12 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 	} else {
 		slog.Info("using normal compressor")
 	}
+	sitemap := SiteMapRoot{}
+	if cmd.SiteMap {
+		if err = sitemap.initialize(); err != nil {
+			slog.Error("sitemap initialize", "error", err)
+		}
+	}
 	for _, dirname := range args {
 		slog.Debug("adding", "path", dirname)
 		st, err := os.Stat(dirname)
@@ -312,22 +316,53 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 			slog.Error("stat", "path", dirname, "error", err)
 		}
 		if st.IsDir() {
-			err = from_dir(dirname, cmd.StripRoot, cmd.Exclude, cmd.Stored, cmd.MinSize, cmd.BaseURL, zipfile)
+			err = cmd.from_dir(dirname, zipfile, &sitemap)
 			if err != nil {
 				slog.Error("from_dir", "path", dirname, "error", err)
 				return err
 			}
 			slog.Debug("done", "path", dirname)
 		} else if filepath.Ext(dirname) == ".zip" {
-			err = from_zip(dirname, cmd.Exclude, cmd.Stored, cmd.MinSize, cmd.BaseURL, zipfile)
+			err = cmd.from_zip(dirname, zipfile, &sitemap)
 			if err != nil {
 				slog.Error("from_zip", "path", dirname, "error", err)
 			}
 		} else if st.Mode().IsRegular() {
-			err = from_file(dirname, cmd.StripRoot, cmd.Stored, cmd.MinSize, cmd.BaseURL, zipfile)
+			err = cmd.from_file(dirname, zipfile, &sitemap)
 			if err != nil {
 				slog.Error("from_file", "path", dirname, "error", err)
 			}
+		}
+	}
+	if cmd.SiteMap {
+		if err != nil {
+			slog.Error("baseurl + sitemap.xml", "error", err)
+			return err
+		}
+		path, err := os.CreateTemp("", "sitemap-*.xml")
+		if err != nil {
+			return err
+		}
+		defer path.Close()
+		defer os.Remove(path.Name())
+		data, err := xml.MarshalIndent(sitemap, "", "  ")
+		if err != nil {
+			slog.Error("encode sitemap.xml", "error", err)
+		}
+		_, err = path.Write([]byte(xml.Header))
+		if err != nil {
+			slog.Error("tmp write sitemap.xml header", "error", err)
+		}
+		written, err := path.Write(data)
+		if err != nil {
+			slog.Error("tmp write sitemap.xml", "error", err)
+		}
+		if written != len(data) {
+			slog.Error("tmp short write sitemap.xml", "written", written, "length", len(data))
+		}
+		err = cmd.archive_single(path.Name(), "sitemap.xml", zipfile, &SiteMapRoot{})
+		if err != nil {
+			slog.Error("write sitemap", "path", path.Name(), "error", err)
 		}
 	}
 	return nil
