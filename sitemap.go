@@ -20,14 +20,6 @@ type SiteURL struct {
 	UpdatedAt time.Time `xml:"lastmod"`
 }
 
-type MyTime struct {
-	time.Time
-}
-
-func (c *MyTime) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-	return e.EncodeElement(c.Time.Format(time.RFC3339), start)
-}
-
 func (r *SiteMapRoot) initialize() error {
 	r.NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 	return nil
