@@ -105,3 +105,22 @@ func TestLinkNoHtml(t *testing.T) {
 		t.Error("example.com", sdata)
 	}
 }
+
+func TestLinkNotFound(t *testing.T) {
+	fp, err := os.CreateTemp("", "*.txt")
+	if err != nil {
+		t.Error("mktemp", err)
+		return
+	}
+	name := fp.Name()
+	if err = os.Remove(name); err != nil {
+		t.Error("remove", err)
+		return
+	}
+	cmd := LinkCommand{Url: "http://example.com/base/path/plaintext.txt"}
+	err = cmd.Execute([]string{name})
+
+	if err == nil {
+		t.Error("is nil")
+	}
+}
