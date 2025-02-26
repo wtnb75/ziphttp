@@ -2,7 +2,10 @@ package main
 
 import (
 	"archive/zip"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jessevdk/go-flags"
@@ -168,5 +171,103 @@ func TestNormalZipSiteMap(t *testing.T) {
 	}
 	if !flag {
 		t.Error("no sitemap generated")
+	}
+}
+
+func TestZopfliFromFile(t *testing.T) {
+	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	if err != nil {
+		t.Error("mktemp-d", err)
+		return
+	}
+	defer os.Remove(tmpfile.Name())
+	inputfile, err := os.CreateTemp(os.TempDir(), "")
+	if err != nil {
+		t.Error("mktemp-d", err)
+		return
+	}
+	if written, err := inputfile.Write([]byte("hello world\n")); err != nil {
+		t.Error("write testdata", err, written)
+	}
+	if err = inputfile.Sync(); err != nil {
+		t.Error("sync", err)
+	}
+	defer os.Remove(inputfile.Name())
+	zz := ZopfliZip{StripRoot: true}
+	globalOption.Archive = flags.Filename(tmpfile.Name())
+	err = zz.Execute([]string{inputfile.Name()})
+	if err != nil {
+		t.Error("execute", err)
+		return
+	}
+	zr, err := zip.OpenReader(tmpfile.Name())
+	if err != nil {
+		t.Error("cannot open zip", err)
+	}
+	defer zr.Close()
+	fl, err := zr.Open(filepath.Base(inputfile.Name()))
+	if err != nil {
+		t.Error("file not found", err)
+	}
+	defer fl.Close()
+	data, err := io.ReadAll(fl)
+	if err != nil {
+		t.Error("read from zip", err)
+	}
+	if string(data) != "hello world\n" {
+		t.Error("data mismatch", data)
+	}
+}
+
+func TestZopfliFromDir(t *testing.T) {
+	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	if err != nil {
+		t.Error("mktemp-d", err)
+		return
+	}
+	defer os.Remove(tmpfile.Name())
+	inputdir, err := os.MkdirTemp(os.TempDir(), "")
+	if err != nil {
+		t.Error("mktemp-d", err)
+		return
+	}
+	for i := range 10 {
+		if cr, err := os.Create(filepath.Join(inputdir, fmt.Sprintf("%d.txt", i))); err != nil {
+			t.Error("tmpfile", i, err)
+		} else {
+			for j := range 100 {
+				fmt.Fprintln(cr, "test data", i, j)
+			}
+			cr.Close()
+		}
+	}
+	defer os.RemoveAll(inputdir)
+	zz := ZopfliZip{StripRoot: true}
+	globalOption.Archive = flags.Filename(tmpfile.Name())
+	err = zz.Execute([]string{inputdir})
+	if err != nil {
+		t.Error("execute", err)
+		return
+	}
+	zr, err := zip.OpenReader(tmpfile.Name())
+	if err != nil {
+		t.Error("cannot open zip", err)
+	}
+	defer zr.Close()
+	fl, err := zr.Open("5.txt")
+	if err != nil {
+		t.Error("file not found", err)
+	}
+	defer fl.Close()
+	data := make([]byte, 10)
+	readlen, err := fl.Read(data)
+	if err != nil {
+		t.Error("read from zip", err)
+	}
+	if readlen != 10 {
+		t.Error("short read", readlen)
+	}
+	if string(data) != "test data " {
+		t.Error("data mismatch", data)
 	}
 }
