@@ -62,7 +62,7 @@ type ZopfliZip struct {
 	UseNormal bool     `long:"no-zopfli" description:"do not use zopfli compress"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
 	IndexFile string   `long:"index" default:"index.html"`
-	SiteMap   bool     `long:"sitemap" description:"generate sitemap.xml"`
+	SiteMap   string   `long:"sitemap" description:"generate sitemap.xml"`
 }
 
 func (cmd *ZopfliZip) archive_single(path string, archivepath string, w *zip.Writer, sitemap *SiteMapRoot) error {
@@ -121,8 +121,8 @@ func (cmd *ZopfliZip) archive_single(path string, archivepath string, w *zip.Wri
 		slog.Error("zipFlush", "path", path, "archivepath", archivepath, "error", err)
 		return err
 	}
-	if cmd.SiteMap {
-		if err = sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: hdr}); err != nil {
+	if cmd.SiteMap != "" {
+		if err = sitemap.AddZip(cmd.SiteMap, &zip.File{FileHeader: hdr}); err != nil {
 			slog.Error("sitemap addzip", "name", archivepath, "error", err)
 		}
 	}
@@ -241,8 +241,8 @@ func (cmd *ZopfliZip) from_zip(root string, w *zip.Writer, sitemap *SiteMapRoot)
 		}
 		slog.Debug("copied", "root", root, "file", f.Name, "written", written)
 		w.Flush()
-		if cmd.SiteMap {
-			if err = sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: fh}); err != nil {
+		if cmd.SiteMap != "" {
+			if err = sitemap.AddZip(cmd.SiteMap, &zip.File{FileHeader: fh}); err != nil {
 				slog.Error("sitemap", "name", f.Name, "error", err)
 			}
 		}
@@ -308,7 +308,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 		slog.Info("using normal compressor")
 	}
 	sitemap := SiteMapRoot{}
-	if cmd.SiteMap {
+	if cmd.SiteMap != "" {
 		if err = sitemap.initialize(); err != nil {
 			slog.Error("sitemap initialize", "error", err)
 		}
@@ -338,7 +338,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 			}
 		}
 	}
-	if cmd.SiteMap {
+	if cmd.SiteMap != "" {
 		if err != nil {
 			slog.Error("baseurl + sitemap.xml", "error", err)
 			return err

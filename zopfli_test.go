@@ -134,7 +134,7 @@ func TestNormalZipSiteMap(t *testing.T) {
 		Exclude:   []string{"128m*"}, // skip 128mb.txt
 		MinSize:   513,               // do not compress 512b.txt
 		UseNormal: true,
-		SiteMap:   true,
+		SiteMap:   "http://example.com/path/",
 		BaseURL:   "http://example.com/path/",
 	}
 	globalOption.Archive = flags.Filename(tmpfile.Name())
