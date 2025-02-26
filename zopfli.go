@@ -122,7 +122,9 @@ func (cmd *ZopfliZip) archive_single(path string, archivepath string, w *zip.Wri
 		return err
 	}
 	if cmd.SiteMap {
-		sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: hdr})
+		if err = sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: hdr}); err != nil {
+			slog.Error("sitemap addzip", "name", archivepath, "error", err)
+		}
 	}
 	return nil
 }
@@ -240,7 +242,9 @@ func (cmd *ZopfliZip) from_zip(root string, w *zip.Writer, sitemap *SiteMapRoot)
 		slog.Debug("copied", "root", root, "file", f.Name, "written", written)
 		w.Flush()
 		if cmd.SiteMap {
-			sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: fh})
+			if err = sitemap.AddZip(cmd.BaseURL, &zip.File{FileHeader: fh}); err != nil {
+				slog.Error("sitemap", "name", f.Name, "error", err)
+			}
 		}
 	}
 	return nil
