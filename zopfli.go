@@ -60,6 +60,7 @@ type ZopfliZip struct {
 	Stored    []string `short:"n" long:"stored" description:"non compress patterns"`
 	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
 	UseNormal bool     `long:"no-zopfli" description:"do not use zopfli compress"`
+	UseAsIs   bool     `long:"asis" description:"copy as-is from zipfile"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
 	IndexFile string   `long:"index" default:"index.html"`
 	SiteMap   string   `long:"sitemap" description:"generate sitemap.xml"`
@@ -250,6 +251,50 @@ func (cmd *ZopfliZip) from_zip(root string, w *zip.Writer, sitemap *SiteMapRoot)
 	return nil
 }
 
+func (cmd *ZopfliZip) from_zip_asis(root string, w *zip.Writer, sitemap *SiteMapRoot) error {
+	slog.Debug("from_zip", "exclude", cmd.Exclude, "store", cmd.Stored)
+	zf, err := zip.OpenReader(root)
+	if err != nil {
+		slog.Error("openreader", "root", root, "error", err)
+		return err
+	}
+	defer zf.Close()
+	for _, f := range zf.File {
+		if ismatch(f.Name, cmd.Exclude) {
+			continue
+		}
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		wr, err := w.CreateRaw(&f.FileHeader)
+		if err != nil {
+			slog.Error("CreateRaw", "error", err, "name", f.Name)
+			return err
+		}
+		rd, err := f.OpenRaw()
+		if err != nil {
+			slog.Error("OpenRaw", "error", err, "name", f.Name)
+			return err
+		}
+		written, err := io.Copy(wr, rd)
+		if err != nil && err != io.EOF {
+			slog.Error("copy", "error", err, "name", f.Name, "written", written)
+			return err
+		}
+		slog.Debug("done copy", "written", written, "name", f.Name, "error", err)
+		if err = w.Flush(); err != nil {
+			slog.Error("flush", "error", err, "name", f.Name)
+			return err
+		}
+		if cmd.SiteMap != "" {
+			if err = sitemap.AddZip(cmd.SiteMap, &zip.File{FileHeader: f.FileHeader}); err != nil {
+				slog.Error("sitemap", "name", f.Name, "error", err)
+			}
+		}
+	}
+	return nil
+}
+
 func (cmd *ZopfliZip) Execute(args []string) (err error) {
 	init_log()
 	var mode os.FileMode
@@ -327,7 +372,11 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 			}
 			slog.Debug("done", "path", dirname)
 		} else if filepath.Ext(dirname) == ".zip" {
-			err = cmd.from_zip(dirname, zipfile, &sitemap)
+			if cmd.UseAsIs {
+				err = cmd.from_zip_asis(dirname, zipfile, &sitemap)
+			} else {
+				err = cmd.from_zip(dirname, zipfile, &sitemap)
+			}
 			if err != nil {
 				slog.Error("from_zip", "path", dirname, "error", err)
 			}
