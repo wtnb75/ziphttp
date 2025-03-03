@@ -62,7 +62,6 @@ type ZopfliZip struct {
 	UseNormal bool     `long:"no-zopfli" description:"do not use zopfli compress"`
 	UseAsIs   bool     `long:"asis" description:"copy as-is from zipfile"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
-	IndexFile string   `long:"index" default:"index.html"`
 	SiteMap   string   `long:"sitemap" description:"generate sitemap.xml"`
 }
 
@@ -108,7 +107,13 @@ func (cmd *ZopfliZip) archive_single(path string, archivepath string, w *zip.Wri
 		slog.Error("zipCreate", "path", archivepath, "error", err)
 		return err
 	}
-	written, err := filtercopy(fp, rd, cmd.BaseURL)
+	new_url, err := url.JoinPath(cmd.BaseURL, archivepath)
+	if err != nil {
+		slog.Error("urljoin", "base", cmd.BaseURL, "path", archivepath, "error", err)
+		return err
+	}
+	slog.Debug("url", "baseurl", cmd.BaseURL, "path", archivepath, "new_url", new_url)
+	written, err := filtercopy(fp, rd, new_url)
 	if err != nil {
 		slog.Error("Copy", "path", path, "archivepath", archivepath, "error", err, "written", written)
 		return err
@@ -228,8 +233,9 @@ func (cmd *ZopfliZip) from_zip(root string, w *zip.Writer, sitemap *SiteMapRoot)
 		}
 		new_url := cmd.BaseURL
 		if cmd.BaseURL != "" {
-			new_url, _ = url.JoinPath(cmd.BaseURL, f.Name)
+			new_url, _ = url.JoinPath(cmd.BaseURL, fh.Name)
 		}
+		slog.Debug("url", "baseurl", cmd.BaseURL, "name", fh.Name, "new_url", new_url)
 		written, err := filtercopy(wr, rd, new_url)
 		if err != nil {
 			slog.Error("Copy", "root", root, "file", f.Name, "error", err, "written", written)

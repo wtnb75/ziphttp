@@ -224,6 +224,7 @@ func process_line(here string, line string) string {
 
 func LinkRelative(here string, reader io.Reader, writer io.Writer) error {
 	if !ismatch(strings.ToLower(filepath.Base(here)), []string{"*.html", "*.htm", "*.xml"}) {
+		slog.Debug("not match html/xml", "here", here, "base", strings.ToLower(filepath.Base(here)))
 		_, err := io.Copy(writer, reader)
 		return err
 	}
