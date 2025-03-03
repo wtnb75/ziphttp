@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // from RFC1952, (no FEXTRA/FNAME/FCOMMENT/FHCRC)
@@ -247,6 +248,100 @@ func LinkRelative(here string, reader io.Reader, writer io.Writer) error {
 		_, err = writer.Write([]byte(process_line(here, line)))
 		if err != nil {
 			slog.Error("write", "line", line, "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func filtercopy(dst io.Writer, src io.Reader, baseurl string) (int64, error) {
+	if baseurl != "" {
+		rpipe, wpipe := io.Pipe()
+		defer rpipe.Close()
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func(w *sync.WaitGroup) {
+			defer w.Done()
+			defer wpipe.Close()
+			err := LinkRelative(baseurl, src, wpipe)
+			if err != nil {
+				slog.Error("linkrelative", "error", err, "baseurl", baseurl)
+			}
+		}(&wg)
+		written, err := io.Copy(dst, rpipe)
+		if err != nil {
+			slog.Error("Copy", "baseurl", baseurl)
+		}
+		slog.Debug("written", "baseurl", baseurl, "written", written)
+		wg.Wait()
+		return written, err
+	}
+	return io.Copy(dst, src)
+}
+
+type CompressWork struct {
+	Header *zip.FileHeader
+	Reader io.Reader
+	MyURL  string
+}
+
+func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for {
+		job, ok := <-ch
+		if !ok {
+			slog.Info("channel closed", "name", name)
+			if err := wr.Close(); err != nil {
+				slog.Error("Close", "name", name)
+			}
+			return
+		}
+		slog.Info("work", "name", name, "job", job.Header.Name)
+		fp, err := wr.CreateHeader(job.Header)
+		if err != nil {
+			slog.Error("CreateHeader", "name", job.Header.Name, "error", err)
+			return
+		}
+		written, err := filtercopy(fp, job.Reader, job.MyURL)
+		if err != nil {
+			slog.Error("Copy", "path", name, "url", job.MyURL, "error", err, "written", written)
+			return
+		}
+		slog.Debug("Copy", "path", name, "url", job.MyURL, "written", written)
+		if err = wr.Flush(); err != nil {
+			slog.Error("flush", "path", name, "url", job.MyURL, "error", err)
+		}
+		clos := job.Reader.(io.ReadCloser)
+		if clos != nil {
+			if err = clos.Close(); err != nil {
+				slog.Error("close", "path", name, "url", job.MyURL, "error", err)
+			}
+		}
+	}
+}
+
+func ZipPassThru(wr *zip.Writer, files []*zip.File) error {
+	for _, f := range files {
+		ofh := f.FileHeader
+		ifp, err := f.OpenRaw()
+		if err != nil {
+			slog.Error("OpenRaw", "name", f.Name, "error", err)
+			return err
+		}
+		ofp, err := wr.CreateRaw(&ofh)
+		if err != nil {
+			slog.Error("CreateRaw", "name", ofh.Name, "error", err)
+			return err
+		}
+		written, err := io.Copy(ofp, ifp)
+		if err != nil && err != io.EOF {
+			slog.Error("copy", "error", err, "name", f.Name, "written", written)
+			return err
+		}
+		slog.Debug("done copy", "written", written, "name", f.Name, "error", err)
+		if err = wr.Flush(); err != nil {
+			slog.Error("flush", "error", err, "name", f.Name)
 			return err
 		}
 	}
