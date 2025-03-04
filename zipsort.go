@@ -12,20 +12,34 @@ import (
 type ZipSort struct {
 	StripPrefix []string `long:"strip-prefix" description:"strip prefixes"`
 	Exclude     []string `short:"x" long:"exclude" description:"exclude files"`
-	SortBy      string   `long:"sort-by" choice:"name" choice:"time" choice:"usize" choice:"csize"`
+	SortBy      string   `long:"sort-by" choice:"none" choice:"name" choice:"time" choice:"usize" choice:"csize"`
 	Reverse     bool     `short:"r" long:"reverse" description:"reversed order"`
 }
 
 func compare_file(a, b *zip.File) bool {
+	if a.CRC32 == b.CRC32 {
+		if a.CompressedSize64 < b.CompressedSize64 {
+			// a: smaller
+			return false
+		} else if a.CompressedSize64 > b.CompressedSize64 {
+			// b: smaller
+			return true
+		}
+		if a.Modified.After(b.Modified) {
+			// b: older
+			return true
+		}
+		return false
+	}
 	if a.Modified.After(b.Modified) {
-		// a
+		// a: newer
 		return false
 	}
 	if a.Modified.Equal(b.Modified) && a.UncompressedSize64 > b.UncompressedSize64 {
-		// a
+		// a: smaller
 		return false
 	}
-	// b
+	// b: later
 	return true
 }
 
@@ -110,6 +124,7 @@ func (cmd *ZipSort) Execute(args []string) (err error) {
 			}
 		}
 	}
+	slog.Info("read files", "num", len(files))
 	// map to array
 	names := make([]string, 0)
 	for k := range files {
@@ -165,6 +180,8 @@ func (cmd *ZipSort) Execute(args []string) (err error) {
 				return a.CompressedSize64 < b.CompressedSize64
 			})
 		}
+	default: // "none"
+		slog.Info("no sort")
 	}
 	// output to zipfile
 	for _, name := range names {
