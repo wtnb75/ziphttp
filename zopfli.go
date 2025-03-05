@@ -109,7 +109,7 @@ func (cmd *ZopfliZip) from_dir(root string, jobs chan<- CompressWork, sitemap *S
 			slog.Debug("exclude-match", "path", path, "exclude", cmd.Exclude)
 			return nil
 		}
-		slog.Info("walk", "root", root, "path", path, "type", info.Type(), "name", info.Name(), "error", err)
+		slog.Debug("walk", "root", root, "path", path, "type", info.Type(), "name", info.Name(), "error", err)
 		var archivepath string
 		if cmd.StripRoot {
 			archivepath, err = filepath.Rel(root, path)
@@ -349,7 +349,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 			} else {
 				var zf *zip.ReadCloser
 				zf, err = cmd.from_zip(dirname, jobs, &sitemap)
-				slog.Info("from_zip", "name", dirname, "error", err)
+				slog.Debug("from_zip", "name", dirname, "error", err)
 				if zf != nil {
 					defer zf.Close()
 				}

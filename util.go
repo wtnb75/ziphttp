@@ -2,10 +2,10 @@ package main
 
 import (
 	"archive/zip"
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"golang.org/x/net/html"
 )
 
 // from RFC1952, (no FEXTRA/FNAME/FCOMMENT/FHCRC)
@@ -223,35 +225,86 @@ func process_line(here string, line string) string {
 	})
 }
 
-func LinkRelative(here string, reader io.Reader, writer io.Writer) error {
-	if !ismatch(strings.ToLower(filepath.Base(here)), []string{"*.html", "*.htm", "*.xml"}) {
-		slog.Debug("not match html/xml", "here", here, "base", strings.ToLower(filepath.Base(here)))
-		_, err := io.Copy(writer, reader)
-		return err
-	}
-	slog.Debug("link relative", "here", here)
-	rd := bufio.NewReader(reader)
-	for {
-		line, err := rd.ReadString('\n')
-		if err == io.EOF {
-			_, err = writer.Write([]byte(process_line(here, line)))
-			if err != nil {
-				slog.Error("write(eof)", "line", line)
-				return err
+func dochild(node *html.Node, here string) error {
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		slog.Debug("node", "node", c)
+		if c.Type == html.ElementNode {
+			for idx, v := range c.Attr {
+				if v.Key == "href" || v.Key == "src" {
+					newlink := fix_link(here, v.Val)
+					slog.Debug("fix link", "key", v.Key, "value", v.Val, "new", newlink)
+					c.Attr[idx] = html.Attribute{Key: v.Key, Val: newlink}
+				}
 			}
-			break
-		}
-		if err != nil {
-			slog.Error("readstring", "line", line, "error", err)
-			return err
-		}
-		_, err = writer.Write([]byte(process_line(here, line)))
-		if err != nil {
-			slog.Error("write", "line", line, "error", err)
-			return err
+			dochild(c, here)
 		}
 	}
 	return nil
+}
+
+func LinkRelative_html(here string, reader io.Reader, writer io.Writer) error {
+	if !ismatch(strings.ToLower(filepath.Base(here)), []string{"*.html", "*.htm"}) {
+		slog.Debug("not match html", "here", here, "base", strings.ToLower(filepath.Base(here)))
+		_, err := io.Copy(writer, reader)
+		return err
+	}
+	node, err := html.Parse(reader)
+	if err != nil {
+		slog.Error("parse", "error", err)
+		return err
+	}
+	err = dochild(node, here)
+	if err != nil {
+		slog.Error("traverse", "error", err)
+		return err
+	}
+	html.Render(writer, node)
+	return err
+}
+
+func LinkRelative_xml(here string, reader io.Reader, writer io.Writer) error {
+	if !ismatch(strings.ToLower(filepath.Base(here)), []string{"*.xml"}) {
+		slog.Debug("not match xml", "here", here, "base", strings.ToLower(filepath.Base(here)))
+		_, err := io.Copy(writer, reader)
+		return err
+	}
+	dec := xml.NewDecoder(reader)
+	enc := xml.NewEncoder(writer)
+	for {
+		token, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			slog.Error("token error", "error", err)
+			return err
+		}
+		switch v := token.(type) {
+		case xml.StartElement:
+			slog.Debug("startelement", "data", v)
+			for idx, a := range v.Attr {
+				if a.Name.Local == "href" || a.Name.Local == "src" {
+					newlink := fix_link(here, a.Value)
+					slog.Debug("fix link", "orig", a.Value, "new", newlink)
+					v.Attr[idx] = xml.Attr{Name: a.Name, Value: newlink}
+				}
+			}
+		}
+		enc.EncodeToken(token)
+	}
+	return nil
+}
+
+func LinkRelative(here string, reader io.Reader, writer io.Writer) error {
+	if ismatch(strings.ToLower(filepath.Base(here)), []string{"*.xml"}) {
+		return LinkRelative_xml(here, reader, writer)
+	}
+	if ismatch(strings.ToLower(filepath.Base(here)), []string{"*.html", "*.htm"}) {
+		return LinkRelative_html(here, reader, writer)
+	}
+	// others: passthru
+	_, err := io.Copy(writer, reader)
+	return err
 }
 
 func filtercopy(dst io.Writer, src io.Reader, baseurl string) (int64, error) {
