@@ -5,8 +5,10 @@ import (
 	"context"
 	_ "embed"
 	"io/fs"
+	"mime"
 	"os"
 	"os/signal"
+	"path"
 	"sync"
 	"syscall"
 	"time"
@@ -182,6 +184,17 @@ func conditional(r *http.Request, etag string, fi *zip.File) bool {
 	return false
 }
 
+func make_contenttype(ctype string) string {
+	if mtype, param, err := mime.ParseMediaType(ctype); err == nil {
+		return mime.FormatMediaType(mtype, param)
+	}
+	return ""
+}
+
+func make_contentbyext(fname string) string {
+	return mime.TypeByExtension(path.Ext(fname))
+}
+
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	statuscode := http.StatusOK
 	if h.accesslog != nil {
@@ -241,10 +254,17 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
 			}
 			// fast path
-			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
+			ctype := make_contenttype(fi.Comment)
+			if ctype == "" {
+				ctype = make_contentbyext(fname)
+			}
+			if ctype != "" {
+				w.Header().Set("Content-Type", ctype)
+			}
 			for k, v := range h.headers {
 				w.Header().Set(k, v)
 			}
+			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 			if conditional(r, etag, fi) {
 				statuscode = http.StatusNotModified
 				w.Header().Add("Etag", etag)
@@ -268,10 +288,14 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// encrypted
 			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
 		}
-		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
+		ctype := make_contenttype(fi.Comment)
+		if ctype != "" {
+			w.Header().Set("Content-Type", ctype)
+		}
 		for k, v := range h.headers {
 			w.Header().Set(k, v)
 		}
+		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 		if conditional(r, etag, fi) {
 			statuscode = http.StatusNotModified
 			w.Header().Add("Etag", etag)
