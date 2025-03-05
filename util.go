@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/foobaz/go-zopfli/zopfli"
 	"golang.org/x/net/html"
 )
 
@@ -339,13 +340,13 @@ func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *syn
 	for {
 		job, ok := <-ch
 		if !ok {
-			slog.Info("channel closed", "name", name)
+			slog.Debug("channel closed", "name", name)
 			if err := wr.Close(); err != nil {
 				slog.Error("Close", "name", name)
 			}
 			return
 		}
-		slog.Info("work", "name", name, "job", job.Header.Name)
+		slog.Debug("work", "name", name, "job", job.Header.Name)
 		fp, err := wr.CreateHeader(job.Header)
 		if err != nil {
 			slog.Error("CreateHeader", "name", job.Header.Name, "error", err)
@@ -394,4 +395,26 @@ func ZipPassThru(wr *zip.Writer, files []*zip.File) error {
 		}
 	}
 	return nil
+}
+
+type DeflateWriteCloser struct {
+	opts   zopfli.Options
+	output io.Writer
+	buf    bytes.Buffer
+}
+
+func (d *DeflateWriteCloser) Write(in []byte) (int, error) {
+	return d.buf.Write(in)
+}
+
+func (d *DeflateWriteCloser) Close() error {
+	return zopfli.DeflateCompress(&d.opts, d.buf.Bytes(), d.output)
+}
+
+func MakeZopfli(zipfile *zip.Writer) {
+	zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
+		opts := zopfli.DefaultOptions()
+		dc := DeflateWriteCloser{opts: opts, output: out}
+		return &dc, nil
+	})
 }
