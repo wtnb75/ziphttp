@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -216,15 +215,6 @@ func fix_link(here string, link string) string {
 	return link
 }
 
-func process_line(here string, line string) string {
-	link_regex := regexp.MustCompile(`\s*(src|href)\s*=\s*"?([^" >]*)"?`)
-	return link_regex.ReplaceAllStringFunc(line, func(part string) string {
-		match := link_regex.FindStringSubmatch(part)
-		new_link := fix_link(here, match[2])
-		return fmt.Sprintf(" %s=\"%s\"", match[1], new_link)
-	})
-}
-
 func dochild(node *html.Node, here string) error {
 	for c := node.FirstChild; c != nil; c = c.NextSibling {
 		slog.Debug("node", "node", c)
@@ -236,7 +226,10 @@ func dochild(node *html.Node, here string) error {
 					c.Attr[idx] = html.Attribute{Key: v.Key, Val: newlink}
 				}
 			}
-			dochild(c, here)
+			if err := dochild(c, here); err != nil {
+				slog.Error("traverse-child", "error", err)
+				return err
+			}
 		}
 	}
 	return nil
@@ -258,8 +251,7 @@ func LinkRelative_html(here string, reader io.Reader, writer io.Writer) error {
 		slog.Error("traverse", "error", err)
 		return err
 	}
-	html.Render(writer, node)
-	return err
+	return html.Render(writer, node)
 }
 
 func LinkRelative_xml(here string, reader io.Reader, writer io.Writer) error {
@@ -290,7 +282,10 @@ func LinkRelative_xml(here string, reader io.Reader, writer io.Writer) error {
 				}
 			}
 		}
-		enc.EncodeToken(token)
+		if err = enc.EncodeToken(token); err != nil {
+			slog.Error("encode token", "token", token, "error", err)
+			return err
+		}
 	}
 	return nil
 }
