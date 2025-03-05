@@ -289,9 +289,6 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
 		}
 		ctype := make_contenttype(fi.Comment)
-		if ctype == "" {
-			ctype = make_contentbyext(fname)
-		}
 		if ctype != "" {
 			w.Header().Set("Content-Type", ctype)
 		}
