@@ -99,11 +99,10 @@ services:
   static:   # http://localhost/static/
     image: ghcr.io/wtnb75/ziphttp:main
     volumes:
-    - ./path/to/archive.zip:/archive.zip:ro
+    - ./path/to/zip/dir:/zip:ro
     environment:
-      ZIPHTTP_ARCHIVE: /archive.zip
+      ZIPHTTP_ARCHIVE: /zip/archive.zip
     command:
-    - /ziphttp
     - webserver
     - --addprefix
     - /static

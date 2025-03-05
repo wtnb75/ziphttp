@@ -470,7 +470,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 						slog.Error("cannot process event", "event", event)
 						return
 					}
-					slog.Info("got watcher event", "event", event)
+					slog.Info("got watcher event", "event", event, "op", event.Op.String())
 					if event.Has(fsnotify.Write) {
 						slog.Info("modified", "name", event.Name)
 						if err = cmd.Reload(); err != nil {
