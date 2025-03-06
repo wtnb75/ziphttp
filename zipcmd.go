@@ -208,6 +208,9 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 	if cmd.Parallel != 1 && cmd.SortBy != "" && cmd.SortBy != "none" {
 		slog.Warn("non-parallel and sort is not supported", "sortby", cmd.SortBy, "parallel", cmd.Parallel)
 	}
+	if !cmd.NoCRC && cmd.BaseURL != "" {
+		slog.Warn("make url relative (--baseurl) without --no-crc is not supported", "baseurl", cmd.BaseURL, "nocrc", cmd.NoCRC)
+	}
 	ofp, zipfile, err := cmd.prepare_output()
 	if err != nil {
 		slog.Error("open output", "error", err)
