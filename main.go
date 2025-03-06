@@ -53,10 +53,11 @@ func main() {
 	commands := []SubCommand{
 		{Name: "webserver", Short: "boot webserver", Long: "boot zipweb", Data: &WebServer{}},
 		{Name: "ziplist", Short: "list zip names", Long: "list zip names", Data: &ZipList{}},
-		{Name: "zip", Short: "create zip", Long: "create new archive from dir/file/zip", Data: &ZopfliZip{}},
+		{Name: "oldzip", Short: "create zip", Long: "create new archive from dir/file/zip", Data: &ZopfliZip{}},
 		{Name: "zip2gzip", Short: "extract from zip", Long: "extract files from zip without decompress", Data: &ZiptoGzip{}},
 		{Name: "testlink", Short: "test link rewrite", Long: "test rewrite link to relative", Data: &LinkCommand{}},
 		{Name: "zipsort", Short: "sort zip", Long: "sort zip by name", Data: &ZipSort{}},
+		{Name: "zip", Short: "create zip", Long: "create new archive from dir/file/zip", Data: &ZipCmd{}},
 	}
 	parser := flags.NewParser(&globalOption, flags.Default)
 	for _, cmd := range commands {

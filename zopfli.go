@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -14,23 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-
-	"github.com/foobaz/go-zopfli/zopfli"
 )
-
-type DeflateWriteCloser struct {
-	opts   zopfli.Options
-	output io.Writer
-	buf    bytes.Buffer
-}
-
-func (d *DeflateWriteCloser) Write(in []byte) (int, error) {
-	return d.buf.Write(in)
-}
-
-func (d *DeflateWriteCloser) Close() error {
-	return zopfli.DeflateCompress(&d.opts, d.buf.Bytes(), d.output)
-}
 
 type ZopfliZip struct {
 	StripRoot bool     `short:"s" long:"strip-root" description:"strip root path"`
@@ -42,6 +25,8 @@ type ZopfliZip struct {
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
 	SiteMap   string   `long:"sitemap" description:"generate sitemap.xml"`
 	Parallel  uint     `short:"p" long:"parallel" description:"parallel compression"`
+	Delete    bool     `long:"delete" description:"skip removed files"`
+	NoCRC     bool     `long:"no-crc" description:"do not use CRC32 to detect change"`
 }
 
 func (cmd *ZopfliZip) archive_single(path string, archivepath string, jobs chan<- CompressWork, sitemap *SiteMapRoot) error {
@@ -280,11 +265,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 	zipfile.SetOffset(written)
 	if !cmd.UseNormal {
 		slog.Info("using zopfli compressor")
-		zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
-			opts := zopfli.DefaultOptions()
-			dc := DeflateWriteCloser{opts: opts, output: out}
-			return &dc, nil
-		})
+		MakeZopfli(zipfile)
 	} else {
 		slog.Info("using normal compressor")
 	}
@@ -314,11 +295,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 			defer fi.Close()
 			wr := zip.NewWriter(fi)
 			if !cmd.UseNormal {
-				wr.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
-					opts := zopfli.DefaultOptions()
-					dc := DeflateWriteCloser{opts: opts, output: out}
-					return &dc, nil
-				})
+				MakeZopfli(wr)
 			}
 			wg.Add(1)
 			go CompressWorker(path.Base(tf), wr, jobs, &wg)
