@@ -1,9 +1,8 @@
 package main
 
 import (
-	"os"
-
 	"log/slog"
+	"os"
 
 	"github.com/jessevdk/go-flags"
 )

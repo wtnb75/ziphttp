@@ -186,7 +186,7 @@ func TestZipcmdFromFile(t *testing.T) {
 		t.Error("mktemp-d", err)
 		return
 	}
-	if written, err := inputfile.Write([]byte("hello world\n")); err != nil {
+	if written, err := inputfile.WriteString("hello world\n"); err != nil {
 		t.Error("write testdata", err, written)
 	}
 	if err = inputfile.Sync(); err != nil {
@@ -226,11 +226,7 @@ func TestZipcmdFromDir(t *testing.T) {
 		return
 	}
 	defer os.Remove(tmpfile.Name())
-	inputdir, err := os.MkdirTemp(os.TempDir(), "")
-	if err != nil {
-		t.Error("mktemp-d", err)
-		return
-	}
+	inputdir := t.TempDir()
 	for i := range 10 {
 		if cr, err := os.Create(filepath.Join(inputdir, fmt.Sprintf("%d.txt", i))); err != nil {
 			t.Error("tmpfile", i, err)
@@ -241,7 +237,6 @@ func TestZipcmdFromDir(t *testing.T) {
 			cr.Close()
 		}
 	}
-	defer os.RemoveAll(inputdir)
 	zz := ZipCmd{StripRoot: true}
 	globalOption.Archive = flags.Filename(tmpfile.Name())
 	err = zz.Execute([]string{inputdir})

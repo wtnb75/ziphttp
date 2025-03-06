@@ -1,32 +1,31 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	_ "embed"
+	"fmt"
+	"io"
 	"io/fs"
+	"log/slog"
 	"mime"
+	"net/http"
 	"os"
 	"os/signal"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	"archive/zip"
-	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
 
 type ZipFile interface {
-	File(int) *zip.File
-	Open(string) (fs.File, error)
+	File(index int) *zip.File
+	Open(name string) (fs.File, error)
 	Close() error
 	Files() int
 }
@@ -318,13 +317,14 @@ func (h *ZipHandler) init2() {
 		fi := h.zipfile.File(i)
 		offset, err := fi.DataOffset()
 		slog.Debug("file", "n", i, "offset", offset, "error", err)
-		if fi.FileInfo().IsDir() {
+		switch {
+		case fi.FileInfo().IsDir():
 			slog.Debug("isdir", "name", fi.Name)
 			continue
-		} else if fi.Method == zip.Deflate {
+		case fi.Method == zip.Deflate:
 			slog.Debug("isdeflate", "name", fi.Name)
 			h.deflmap[fi.Name] = i
-		} else {
+		default:
 			slog.Debug("store", "name", fi.Name, "method", fi.Method)
 			h.storemap[fi.Name] = i
 		}

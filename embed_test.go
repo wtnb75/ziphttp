@@ -10,7 +10,8 @@ import (
 var testzip []byte
 
 func prepare(t *testing.T) string {
-	fp, err := os.CreateTemp("", "zip*.zip")
+	t.Helper()
+	fp, err := os.CreateTemp(t.TempDir(), "zip*.zip")
 	if err != nil {
 		t.Error("CreateTemp", err)
 		panic(err)

@@ -220,9 +220,9 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 	init_log()
 	var mode os.FileMode
 	if globalOption.Self {
-		mode = 0755
+		mode = 0o755
 	} else {
-		mode = 0644
+		mode = 0o644
 	}
 	ofp, err := os.OpenFile(string(globalOption.Archive), os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
@@ -313,14 +313,15 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 		if err != nil {
 			slog.Error("stat", "path", dirname, "error", err)
 		}
-		if st.IsDir() {
+		switch {
+		case st.IsDir():
 			err = cmd.from_dir(dirname, jobs, &sitemap)
 			if err != nil {
 				slog.Error("from_dir", "path", dirname, "error", err)
 				return err
 			}
 			slog.Debug("done", "path", dirname)
-		} else if filepath.Ext(dirname) == ".zip" {
+		case filepath.Ext(dirname) == ".zip":
 			if cmd.UseAsIs {
 				err = cmd.from_zip_asis(dirname, zipfile, &sitemap)
 			} else {
@@ -334,7 +335,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 			if err != nil {
 				slog.Error("from_zip", "path", dirname, "error", err)
 			}
-		} else if st.Mode().IsRegular() {
+		case st.Mode().IsRegular():
 			err = cmd.from_file(dirname, jobs, &sitemap)
 			if err != nil {
 				slog.Error("from_file", "path", dirname, "error", err)
@@ -356,7 +357,7 @@ func (cmd *ZopfliZip) Execute(args []string) (err error) {
 		if err != nil {
 			slog.Error("encode sitemap.xml", "error", err)
 		}
-		_, err = path.Write([]byte(xml.Header))
+		_, err = path.WriteString(xml.Header)
 		if err != nil {
 			slog.Error("tmp write sitemap.xml header", "error", err)
 		}

@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"time"
-
 	"testing"
+	"time"
 )
 
 func TestStored(t *testing.T) {
+	t.Parallel()
 	hdl := ZipHandler{
 		zipfile:     nil,
 		stripprefix: "",
@@ -43,6 +43,7 @@ func TestStored(t *testing.T) {
 }
 
 func TestDeflate(t *testing.T) {
+	t.Parallel()
 	hdl := ZipHandler{
 		zipfile:     nil,
 		stripprefix: "",
@@ -91,6 +92,7 @@ func TestDeflate(t *testing.T) {
 }
 
 func TestIndex(t *testing.T) {
+	t.Parallel()
 	hdl := ZipHandler{
 		zipfile:     nil,
 		stripprefix: "",
@@ -116,6 +118,7 @@ func TestIndex(t *testing.T) {
 }
 
 func TestNotFound(t *testing.T) {
+	t.Parallel()
 	hdl := ZipHandler{
 		zipfile:     nil,
 		stripprefix: "",
@@ -141,6 +144,7 @@ func TestNotFound(t *testing.T) {
 }
 
 func TestConditional(t *testing.T) {
+	t.Parallel()
 	etag_true := "W/12345678"
 	etag_false := "W/00000000"
 	r_both_etag_false := &http.Request{
