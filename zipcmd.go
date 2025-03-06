@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -366,6 +365,9 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		}
 		defer asisfp.Close()
 		asiszip = zip.NewWriter(asisfp)
+		if !cmd.UseNormal {
+			MakeZopfli(asiszip)
+		}
 		for i := range cmd.Parallel {
 			tf := filepath.Join(td, fmt.Sprintf("%d.zip", i))
 			fi, err := os.Create(tf)
@@ -432,16 +434,24 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			Method:   zip.Deflate,
 			Modified: lastmodified,
 		}
-		xmlstr, err := xml.Marshal(sitemap)
-		if err != nil {
-			slog.Error("sitemap generate error", "error", err)
+		if wr, err := asiszip.CreateHeader(&fh); err != nil {
+			slog.Error("create sitemap", "error", err)
+			xmlstr, err := xml.Marshal(sitemap)
+			if err != nil {
+				slog.Error("sitemap generate error", "error", err)
+				return err
+			}
+			written, err := wr.Write(xmlstr)
+			if err != nil {
+				slog.Error("write sitemap", "error", err, "written", written)
+				return err
+			}
+			slog.Debug("sitemap written", "written", written)
+			if err := asiszip.Flush(); err != nil {
+				slog.Error("sitemap flush", "error", err)
+				return err
+			}
 		}
-		ifp := io.NopCloser(bytes.NewBuffer(xmlstr))
-		cw := CompressWork{
-			Header: &fh,
-			Reader: ifp,
-		}
-		jobs <- cw
 	}
 	slog.Info("close jobs")
 	close(jobs)
