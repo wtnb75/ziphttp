@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"sort"
 	"sync"
-	"time"
 )
 
 type ZipCmd struct {
@@ -356,12 +355,14 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		td, err = os.MkdirTemp("", "")
 		if err != nil {
 			slog.Error("mkdirtemp", "error", err)
+			return err
 		}
 		slog.Info("tmpdir", "name", td)
 		defer os.RemoveAll(td)
 		asisfp, err := os.Create(filepath.Join(td, "asis.zip"))
 		if err != nil {
 			slog.Error("create tempfile", "name", "asis.zip")
+			return err
 		}
 		defer asisfp.Close()
 		asiszip = zip.NewWriter(asisfp)
@@ -373,6 +374,7 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			fi, err := os.Create(tf)
 			if err != nil {
 				slog.Error("create tempfile", "name", tf)
+				return err
 			}
 			defer fi.Close()
 			wr := zip.NewWriter(fi)
@@ -387,12 +389,12 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 	sitemap := SiteMapRoot{}
 	if err := sitemap.initialize(); err != nil {
 		slog.Error("sitemap initialize", "error", err)
+		return err
 	}
 	if _, ok := nametable["sitemap.xml"]; ok && cmd.SiteMap != "" {
 		slog.Info("disable sitemap: already exists")
 		cmd.SiteMap = ""
 	}
-	lastmodified := time.Unix(0, 0)
 	// process nametable
 	for k, v := range nametable {
 		slog.Debug("process", "name", k, "num", len(v))
@@ -406,9 +408,6 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			slog.Debug("win-file", "name", k, "root", target.Root, "name", target.Name)
 		} else {
 			slog.Debug("win-zip", "name", k, "name", target.Name)
-		}
-		if target.ModTime.After(lastmodified) {
-			lastmodified = target.ModTime
 		}
 		if cmd.SiteMap != "" {
 			if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
@@ -432,7 +431,7 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		fh := zip.FileHeader{
 			Name:     "sitemap.xml",
 			Method:   zip.Deflate,
-			Modified: lastmodified,
+			Modified: sitemap.LastMod,
 		}
 		if wr, err := asiszip.CreateHeader(&fh); err != nil {
 			slog.Error("create sitemap", "error", err)

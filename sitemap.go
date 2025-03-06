@@ -13,6 +13,7 @@ type SiteMapRoot struct {
 	XMLName  xml.Name   `xml:"urlset"`
 	NS       string     `xml:"xmlns,attr"`
 	SiteList []*SiteURL `xml:"url"`
+	LastMod  time.Time  `xml:"-"`
 }
 
 type SiteURL struct {
@@ -38,6 +39,9 @@ func (r *SiteMapRoot) AddZip(baseurl string, fi *zip.File) error {
 		u = strings.TrimSuffix(u, "index.html")
 	}
 	r.SiteList = append(r.SiteList, &SiteURL{URL: u, UpdatedAt: fi.Modified})
+	if fi.Modified.After(r.LastMod) {
+		r.LastMod = fi.Modified
+	}
 	return nil
 }
 
@@ -51,5 +55,8 @@ func (r *SiteMapRoot) AddFile(baseurl string, indexname string, filename string,
 		u = strings.TrimSuffix(u, indexname)
 	}
 	r.SiteList = append(r.SiteList, &SiteURL{URL: u, UpdatedAt: updated})
+	if updated.After(r.LastMod) {
+		r.LastMod = updated
+	}
 	return nil
 }
