@@ -20,11 +20,12 @@ func (cmd *ZipList) Execute(args []string) (err error) {
 	}
 	defer zipfile.Close()
 	for _, i := range zipfile.File {
-		if i.FileInfo().IsDir() {
+		switch {
+		case i.FileInfo().IsDir():
 			fmt.Println("/", i.Name)
-		} else if i.Method != zip.Deflate {
+		case i.Method != zip.Deflate:
 			fmt.Println("!", i.Name, i.CompressedSize64, i.UncompressedSize64)
-		} else {
+		default:
 			fmt.Println("D", i.Name, i.CompressedSize64, i.UncompressedSize64)
 		}
 	}

@@ -21,7 +21,7 @@ func TestLink(t *testing.T) {
 </ul>
 </body></html>
 `
-	fp, err := os.CreateTemp("", "*.html")
+	fp, err := os.CreateTemp(t.TempDir(), "*.html")
 	if err != nil {
 		t.Error("mktemp", err)
 		return
@@ -69,7 +69,7 @@ func TestLink(t *testing.T) {
 
 func TestLinkNoHtml(t *testing.T) {
 	testdata := `hello world src=http://example.com/blabla href="http://example.com"`
-	fp, err := os.CreateTemp("", "*.txt")
+	fp, err := os.CreateTemp(t.TempDir(), "*.txt")
 	if err != nil {
 		t.Error("mktemp", err)
 		return
@@ -107,7 +107,8 @@ func TestLinkNoHtml(t *testing.T) {
 }
 
 func TestLinkNotFound(t *testing.T) {
-	fp, err := os.CreateTemp("", "*.txt")
+	t.Parallel()
+	fp, err := os.CreateTemp(t.TempDir(), "*.txt")
 	if err != nil {
 		t.Error("mktemp", err)
 		return

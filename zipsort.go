@@ -47,9 +47,9 @@ func (cmd *ZipSort) Execute(args []string) (err error) {
 	init_log()
 	var mode os.FileMode
 	if globalOption.Self {
-		mode = 0755
+		mode = 0o755
 	} else {
-		mode = 0644
+		mode = 0o644
 	}
 	ofp, err := os.OpenFile(string(globalOption.Archive), os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {

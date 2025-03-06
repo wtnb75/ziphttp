@@ -2,15 +2,15 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"io"
 	"os"
-
-	"bytes"
 	"testing"
 )
 
 func TestCopyGzip(t *testing.T) {
+	t.Parallel()
 	fpname := prepare(t)
 	if fpname == "" {
 		t.Error("prepare")
@@ -48,6 +48,7 @@ func TestCopyGzip(t *testing.T) {
 }
 
 func Test_ispat(t *testing.T) {
+	t.Parallel()
 	if ispat([]byte("hello.txt"), []string{"text/*"}) != true {
 		t.Error("hello.txt")
 	}
@@ -60,6 +61,7 @@ func Test_ispat(t *testing.T) {
 }
 
 func Test_ismatch(t *testing.T) {
+	t.Parallel()
 	if ismatch("hello.txt", []string{"*.html", "hello.*"}) != true {
 		t.Error("hello.txt")
 	}
@@ -75,6 +77,7 @@ func Test_ismatch(t *testing.T) {
 }
 
 func TestArchiveOffset(t *testing.T) {
+	t.Parallel()
 	fpname := prepare(t)
 	if fpname == "" {
 		t.Error("prepare")
@@ -91,7 +94,8 @@ func TestArchiveOffset(t *testing.T) {
 }
 
 func TestArchiveOffset2(t *testing.T) {
-	tmpf, err := os.CreateTemp("", "")
+	t.Parallel()
+	tmpf, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("tempfile", err)
 		panic(err)
