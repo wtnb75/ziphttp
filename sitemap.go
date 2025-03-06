@@ -40,3 +40,16 @@ func (r *SiteMapRoot) AddZip(baseurl string, fi *zip.File) error {
 	r.SiteList = append(r.SiteList, &SiteURL{URL: u, UpdatedAt: fi.Modified})
 	return nil
 }
+
+func (r *SiteMapRoot) AddFile(baseurl string, indexname string, filename string, updated time.Time) error {
+	u, err := url.JoinPath(baseurl, filename)
+	if err != nil {
+		slog.Error("joinpath", "base", baseurl, "name", filename)
+		return err
+	}
+	if strings.HasSuffix(u, "/"+indexname) {
+		u = strings.TrimSuffix(u, indexname)
+	}
+	r.SiteList = append(r.SiteList, &SiteURL{URL: u, UpdatedAt: updated})
+	return nil
+}

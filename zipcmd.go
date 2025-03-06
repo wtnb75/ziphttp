@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +14,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"time"
 )
 
 type ZipCmd struct {
@@ -204,6 +207,9 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		cmd.Parallel = uint(runtime.NumCPU())
 	}
 	slog.Info("parallel", "num", cmd.Parallel)
+	if cmd.Parallel != 1 && cmd.SortBy != "" && cmd.SortBy != "none" {
+		slog.Warn("non-parallel and sort is not supported", "sortby", cmd.SortBy, "parallel", cmd.Parallel)
+	}
 	ofp, zipfile, err := cmd.prepare_output()
 	if err != nil {
 		slog.Error("open output", "error", err)
@@ -342,7 +348,9 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 	var td string
 	var wgp sync.WaitGroup
 	jobs := make(chan CompressWork, 10)
+	var asiszip *zip.Writer
 	if cmd.Parallel <= 1 {
+		asiszip = zipfile
 		wgp.Add(1)
 		go CompressWorker("root", zipfile, jobs, &wgp)
 	} else {
@@ -352,6 +360,12 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		}
 		slog.Info("tmpdir", "name", td)
 		defer os.RemoveAll(td)
+		asisfp, err := os.Create(filepath.Join(td, "asis.zip"))
+		if err != nil {
+			slog.Error("create tempfile", "name", "asis.zip")
+		}
+		defer asisfp.Close()
+		asiszip = zip.NewWriter(asisfp)
 		for i := range cmd.Parallel {
 			tf := filepath.Join(td, fmt.Sprintf("%d.zip", i))
 			fi, err := os.Create(tf)
@@ -367,6 +381,16 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			go CompressWorker(filepath.Base(tf), wr, jobs, &wgp)
 		}
 	}
+	// sitemap
+	sitemap := SiteMapRoot{}
+	if err := sitemap.initialize(); err != nil {
+		slog.Error("sitemap initialize", "error", err)
+	}
+	if _, ok := nametable["sitemap.xml"]; ok && cmd.SiteMap != "" {
+		slog.Info("disable sitemap: already exists")
+		cmd.SiteMap = ""
+	}
+	lastmodified := time.Unix(0, 0)
 	// process nametable
 	for k, v := range nametable {
 		slog.Debug("process", "name", k, "num", len(v))
@@ -381,8 +405,16 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		} else {
 			slog.Debug("win-zip", "name", k, "name", target.Name)
 		}
+		if target.ModTime.After(lastmodified) {
+			lastmodified = target.ModTime
+		}
+		if cmd.SiteMap != "" {
+			if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
+				slog.Error("sitemap error", "name", k, "error", err)
+			}
+		}
 		if cmd.UseAsIs {
-			if err := cmd.copy_asis(zipfile, k, target); err == nil {
+			if err := cmd.copy_asis(asiszip, k, target); err == nil {
 				continue
 			} else {
 				slog.Debug("asis failed", "name", k, "error", err)
@@ -394,13 +426,40 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			return err
 		}
 	}
+	if cmd.SiteMap != "" {
+		fh := zip.FileHeader{
+			Name:     "sitemap.xml",
+			Method:   zip.Deflate,
+			Modified: lastmodified,
+		}
+		xmlstr, err := xml.Marshal(sitemap)
+		if err != nil {
+			slog.Error("sitemap generate error", "error", err)
+		}
+		ifp := io.NopCloser(bytes.NewBuffer(xmlstr))
+		cw := CompressWork{
+			Header: &fh,
+			Reader: ifp,
+		}
+		jobs <- cw
+	}
 	slog.Info("close jobs")
 	close(jobs)
 	slog.Info("before wait")
 	wgp.Wait()
+	if err = asiszip.Close(); err != nil {
+		slog.Error("close-asiszip", "error", err)
+	}
 	slog.Info("wait done")
 	if cmd.Parallel > 1 {
 		fileinzips := make([]*zip.File, 0)
+		fname := filepath.Join(td, "asis.zip")
+		zr, err := zip.OpenReader(fname)
+		if err != nil {
+			slog.Error("OpenReader", "name", fname, "error", err)
+		}
+		defer zr.Close()
+		fileinzips = append(fileinzips, zr.File...)
 		for i := range cmd.Parallel {
 			fname := filepath.Join(td, fmt.Sprintf("%d.zip", i))
 			zr, err := zip.OpenReader(fname)
