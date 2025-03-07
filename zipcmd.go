@@ -431,10 +431,11 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		}
 	}
 	if cmd.SiteMap != "" {
+		slog.Info("generating sitemap", "num", len(sitemap.SiteList))
 		fh := zip.FileHeader{
 			Name:     "sitemap.xml",
 			Method:   zip.Deflate,
-			Modified: sitemap.LastMod,
+			Modified: sitemap.LastMod(),
 		}
 		if wr, err := asiszip.CreateHeader(&fh); err != nil {
 			slog.Error("create sitemap", "error", err)

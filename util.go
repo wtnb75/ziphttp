@@ -292,9 +292,10 @@ func LinkRelative_xml(here string, reader io.Reader, writer io.Writer) error {
 }
 
 func LinkRelative(here string, reader io.Reader, writer io.Writer) error {
-	if ismatch(strings.ToLower(filepath.Base(here)), []string{"*.xml"}) {
-		return LinkRelative_xml(here, reader, writer)
-	}
+	/*
+		if ismatch(strings.ToLower(filepath.Base(here)), []string{"*.xml"}) {
+			return LinkRelative_xml(here, reader, writer)
+		} */
 	if ismatch(strings.ToLower(filepath.Base(here)), []string{"*.html", "*.htm"}) {
 		return LinkRelative_html(here, reader, writer)
 	}
