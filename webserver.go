@@ -239,11 +239,26 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rwlock.RLock()
 	defer h.rwlock.RUnlock()
+	fname := h.filename(r)
+	if strings.HasSuffix(fname, ".gz") {
+		if idx, ok := h.deflmap[strings.TrimSuffix(fname, ".gz")]; ok {
+			slog.Debug("gzip file", "name", fname)
+			fi := h.zipfile.File(idx)
+			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Header().Set("Etag", etag+"_gz")
+			written, err := CopyGzip(w, fi)
+			if err != nil {
+				slog.Error("copygzip", "error", err, "written", written)
+			}
+			slog.Debug("copygzip", "written", written)
+			return
+		}
+	}
 	encodings, has_gzip := h.accept_encoding(r)
 	if has_gzip {
 		slog.Debug("gzip encoding supported", "header", encodings)
 	}
-	fname := h.filename(r)
 	slog.Debug("name", "uri", r.URL.Path, "name", fname)
 	if has_gzip {
 		if idx, ok := h.deflmap[fname]; ok {
@@ -406,6 +421,7 @@ type WebServer struct {
 	InMemory          bool     `long:"in-memory" description:"load zip to memory"`
 	Headers           []string `short:"H" long:"header" description:"custom response headers"`
 	AutoReload        bool     `long:"autoreload" description:"detect zip file change and reload"`
+	SupportGzip       bool     `long:"support-gz" description:"support *.gz URL"`
 	server            http.Server
 	handler           ZipHandler
 }
