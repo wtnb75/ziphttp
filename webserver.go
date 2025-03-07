@@ -247,7 +247,11 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 			w.Header().Set("Content-Type", "application/gzip")
 			w.Header().Set("Etag", etag+"_gz")
-			CopyGzip(w, fi)
+			written, err := CopyGzip(w, fi)
+			if err != nil {
+				slog.Error("copygzip", "error", err, "written", written)
+			}
+			slog.Debug("copygzip", "written", written)
 			return
 		}
 	}
