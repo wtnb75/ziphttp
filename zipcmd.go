@@ -29,6 +29,7 @@ type ZipCmd struct {
 	NoCRC     bool     `long:"no-crc" description:"do not use CRC32 to detect change"`
 	SortBy    string   `long:"sort-by" choice:"none" choice:"name" choice:"time" choice:"usize" choice:"csize"`
 	Reverse   bool     `short:"r" long:"reverse" description:"reversed order"`
+	InMemory  bool     `long:"in-memory" description:"do not use /tmp"`
 }
 
 func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
@@ -205,7 +206,7 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		cmd.Parallel = uint(runtime.NumCPU())
 	}
 	slog.Info("parallel", "num", cmd.Parallel)
-	if cmd.Parallel != 1 && cmd.SortBy != "" && cmd.SortBy != "none" {
+	if cmd.Parallel == 1 && cmd.SortBy != "" && cmd.SortBy != "none" {
 		slog.Warn("non-parallel and sort is not supported", "sortby", cmd.SortBy, "parallel", cmd.Parallel)
 	}
 	if !cmd.NoCRC && cmd.BaseURL != "" {
@@ -349,43 +350,55 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 	var td string
 	var wgp sync.WaitGroup
 	jobs := make(chan CompressWork, 10)
+	zipios := make([]ZipIO, 0)
 	var asiszip *zip.Writer
 	if cmd.Parallel <= 1 {
 		asiszip = zipfile
 		wgp.Add(1)
 		go CompressWorker("root", zipfile, jobs, &wgp)
 	} else {
-		td, err = os.MkdirTemp("", "")
-		if err != nil {
-			slog.Error("mkdirtemp", "error", err)
-			return err
-		}
-		slog.Info("tmpdir", "name", td)
-		defer os.RemoveAll(td)
-		asisfp, err := os.Create(filepath.Join(td, "asis.zip"))
-		if err != nil {
-			slog.Error("create tempfile", "name", "asis.zip")
-			return err
+		var asisfp ZipIO
+		if !cmd.InMemory {
+			td, err = os.MkdirTemp("", "")
+			if err != nil {
+				slog.Error("mkdirtemp", "error", err)
+				return err
+			}
+			slog.Info("tmpdir", "name", td)
+			defer os.RemoveAll(td)
+			asisfp = NewFileZip(filepath.Join(td, "asis.zip"))
+		} else {
+			asisfp = NewMemZip()
 		}
 		defer asisfp.Close()
-		asiszip = zip.NewWriter(asisfp)
+		zipios = append(zipios, asisfp)
+		asiszip, err = asisfp.Writer()
+		if err != nil {
+			slog.Error("asis writer", "name", "asis.zip", "error", err)
+			return err
+		}
 		if !cmd.UseNormal {
 			MakeZopfli(asiszip)
 		}
 		for i := range cmd.Parallel {
-			tf := filepath.Join(td, fmt.Sprintf("%d.zip", i))
-			fi, err := os.Create(tf)
-			if err != nil {
-				slog.Error("create tempfile", "name", tf)
-				return err
+			var fi ZipIO
+			if !cmd.InMemory {
+				fi = NewFileZip(filepath.Join(td, fmt.Sprintf("%d.zip", i)))
+			} else {
+				fi = NewMemZip()
 			}
 			defer fi.Close()
-			wr := zip.NewWriter(fi)
+			zipios = append(zipios, fi)
+			wr, err := fi.Writer()
+			if err != nil {
+				slog.Error("worker writer", "number", i)
+				return err
+			}
 			if !cmd.UseNormal {
 				MakeZopfli(wr)
 			}
 			wgp.Add(1)
-			go CompressWorker(filepath.Base(tf), wr, jobs, &wgp)
+			go CompressWorker(fmt.Sprint(i), wr, jobs, &wgp)
 		}
 	}
 	// sitemap
@@ -466,22 +479,13 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 	slog.Info("wait done")
 	if cmd.Parallel > 1 {
 		fileinzips := make([]*zip.File, 0)
-		fname := filepath.Join(td, "asis.zip")
-		zr, err := zip.OpenReader(fname)
-		if err != nil {
-			slog.Error("OpenReader", "name", fname, "error", err)
-		}
-		defer zr.Close()
-		fileinzips = append(fileinzips, zr.File...)
-		for i := range cmd.Parallel {
-			fname := filepath.Join(td, fmt.Sprintf("%d.zip", i))
-			zr, err := zip.OpenReader(fname)
+		for _, z := range zipios {
+			reader, err := z.Reader()
 			if err != nil {
-				slog.Error("OpenReader", "name", fname, "error", err)
+				slog.Error("open reader", "error", err)
+				return err
 			}
-			defer zr.Close()
-			fileinzips = append(fileinzips, zr.File...)
-			slog.Info("merge", "name", filepath.Base(fname), "files", len(zr.File))
+			fileinzips = append(fileinzips, reader.File...)
 		}
 		cmd.sort_files(fileinzips)
 		slog.Info("all files", "num", len(fileinzips))
