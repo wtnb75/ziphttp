@@ -11,7 +11,7 @@ import (
 
 func TestCopyGzip(t *testing.T) {
 	t.Parallel()
-	fpname := prepare(t)
+	fpname := prepare_testzip(t)
 	if fpname == "" {
 		t.Error("prepare")
 		return
@@ -78,7 +78,7 @@ func Test_ismatch(t *testing.T) {
 
 func TestArchiveOffset(t *testing.T) {
 	t.Parallel()
-	fpname := prepare(t)
+	fpname := prepare_testzip(t)
 	if fpname == "" {
 		t.Error("prepare")
 		return

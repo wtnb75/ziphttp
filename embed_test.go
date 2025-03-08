@@ -9,7 +9,7 @@ import (
 //go:embed testdata/test.zip
 var testzip []byte
 
-func prepare(t *testing.T) string {
+func prepare_testzip(t *testing.T) string {
 	t.Helper()
 	fp, err := os.CreateTemp(t.TempDir(), "zip*.zip")
 	if err != nil {

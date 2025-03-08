@@ -47,7 +47,7 @@ type SubCommand struct {
 	Data  interface{}
 }
 
-func main() {
+func realMain() int {
 	var err error
 	commands := []SubCommand{
 		{Name: "webserver", Short: "boot webserver", Long: "boot zipweb", Data: &WebServer{}},
@@ -62,15 +62,20 @@ func main() {
 		_, err = parser.AddCommand(cmd.Name, cmd.Short, cmd.Long, cmd.Data)
 		if err != nil {
 			slog.Error(cmd.Name, "error", err)
-			panic(err)
+			return -1
 		}
 	}
 	if _, err := parser.Parse(); err != nil {
 		if _, ok := err.(*flags.Error); ok {
-			os.Exit(0)
+			return 0
 		}
 		slog.Error("error exit", "error", err)
 		parser.WriteHelp(os.Stdout)
-		os.Exit(1)
+		return 1
 	}
+	return 0
+}
+
+func main() {
+	os.Exit(realMain())
 }

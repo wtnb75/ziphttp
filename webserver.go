@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -191,7 +191,7 @@ func make_contenttype(ctype string) string {
 }
 
 func make_contentbyext(fname string) string {
-	return mime.TypeByExtension(path.Ext(fname))
+	return mime.TypeByExtension(filepath.Ext(fname))
 }
 
 func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
