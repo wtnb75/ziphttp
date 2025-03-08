@@ -43,42 +43,40 @@ func compare_file(a, b *zip.File) bool {
 	return true
 }
 
-func (cmd *ZipSort) Execute(args []string) (err error) {
-	init_log()
+func prepare_output(filename string, self bool) (*os.File, *zip.Writer, error) {
 	var mode os.FileMode
-	if globalOption.Self {
+	if self {
 		mode = 0o755
 	} else {
 		mode = 0o644
 	}
-	ofp, err := os.OpenFile(string(globalOption.Archive), os.O_RDWR|os.O_CREATE, mode)
+	ofp, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
-		slog.Error("openOutput", "path", globalOption.Archive, "error", err)
-		return err
+		slog.Error("openOutput", "path", filename, "error", err)
+		return nil, nil, err
 	}
-	defer ofp.Close()
 	err = ofp.Truncate(0)
 	if err != nil {
-		slog.Error("truncate", "path", globalOption.Archive, "error", err)
-		return err
+		slog.Error("truncate", "path", filename, "error", err)
+		return ofp, nil, err
 	}
 	var written int64
-	if globalOption.Self {
+	if self {
 		cmd_exc, err := os.Executable()
 		if err != nil {
 			slog.Error("cmd", "error", err)
-			return err
+			return ofp, nil, err
 		}
 		cmd_fp, err := os.Open(cmd_exc)
 		if err != nil {
 			slog.Error("cmd open", "name", cmd_exc, "error", err)
-			return err
+			return ofp, nil, err
 		}
 		defer cmd_fp.Close()
 		written, err = io.Copy(ofp, cmd_fp)
 		if err != nil {
-			slog.Error("cmd copy", "name", cmd_exc, "dest", globalOption.Archive, "error", err, "written", written)
-			return err
+			slog.Error("cmd copy", "name", cmd_exc, "dest", filename, "error", err, "written", written)
+			return ofp, nil, err
 		}
 		slog.Debug("copy", "written", written)
 		err = ofp.Sync()
@@ -87,9 +85,26 @@ func (cmd *ZipSort) Execute(args []string) (err error) {
 		}
 	}
 	zipfile := zip.NewWriter(ofp)
-	defer zipfile.Close()
 	slog.Debug("setoffiset", "written", written)
 	zipfile.SetOffset(written)
+	return ofp, zipfile, nil
+}
+
+func (cmd *ZipSort) Execute(args []string) (err error) {
+	init_log()
+	ofp, zipfile, err := prepare_output(string(globalOption.Archive), globalOption.Self)
+	if err != nil {
+		slog.Error("open output", "path", globalOption.Archive, "error", err)
+		if zipfile != nil {
+			zipfile.Close()
+		}
+		if ofp != nil {
+			ofp.Close()
+		}
+		return err
+	}
+	defer zipfile.Close()
+	defer ofp.Close()
 	files := make(map[string]*zip.File, 0)
 	for _, fname := range args {
 		zf, err := zip.OpenReader(fname)

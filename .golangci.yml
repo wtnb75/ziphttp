@@ -7,8 +7,8 @@ linters:
   #- cyclop
   #- funlen
   #- gocognit
-  #- gocyclo
-  #- maintidx
+  - gocyclo
+  - maintidx
   #- nestif
   - gofmt
   #- lll
