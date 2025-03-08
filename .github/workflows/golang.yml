@@ -26,11 +26,16 @@ jobs:
       uses: golangci/golangci-lint-action@v6
     - name: test
       run: go test -v ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./... -json > report.json
-    - name: report
+    - name: report(success)
       uses: becheran/go-testreport@main
       with:
         input: report.json
-      if: steps.lint.outcome == 'success'
+      if: steps.test.outcome == 'success'
+    - name: report(failure)
+      uses: becheran/go-testreport@main
+      with:
+        input: report.json
+      if: steps.test.outcome == 'failure'
     - name: coverage
       run: |
         echo "## coverage report" >> $GITHUB_STEP_SUMMARY
