@@ -25,7 +25,7 @@ func TestStored(t *testing.T) {
 		return
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://dummy.url.com/512b.txt", bytes.NewBuffer([]byte{}))
-	req.Header.Add("accept-encoding", "br, deflate,gzip ")
+	req.Header.Add("Accept-Encoding", "br, deflate,gzip ")
 	got := httptest.NewRecorder()
 	hdl.ServeHTTP(got, req)
 	if got.Code != http.StatusOK {
@@ -37,7 +37,7 @@ func TestStored(t *testing.T) {
 	if !strings.HasPrefix(got.Result().Header.Get("etag"), "W/") {
 		t.Error("etag", got.Result().Header.Get("etag"))
 	}
-	if got.Result().Header.Get("content-encoding") == "gzip" {
+	if got.Result().Header.Get("Content-Encoding") == "gzip" {
 		t.Error("not stored", got.Result().Header.Get("content-encoding"))
 	}
 }
