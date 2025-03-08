@@ -38,7 +38,7 @@ func TestStored(t *testing.T) {
 		t.Error("etag", got.Result().Header.Get("etag"))
 	}
 	if got.Result().Header.Get("Content-Encoding") == "gzip" {
-		t.Error("not stored", got.Result().Header.Get("content-encoding"))
+		t.Error("not stored", got.Result().Header.Get("Content-Encoding"))
 	}
 }
 
@@ -57,7 +57,7 @@ func TestDeflate(t *testing.T) {
 		return
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://dummy.url.com/4kb.txt", bytes.NewBuffer([]byte{}))
-	req.Header.Add("accept-encoding", "br, gzip")
+	req.Header.Add("Accept-Encoding", "br, gzip")
 	got := httptest.NewRecorder()
 	hdl.ServeHTTP(got, req)
 	if got.Code != http.StatusOK {
@@ -66,11 +66,11 @@ func TestDeflate(t *testing.T) {
 	if got.Result().ContentLength == 4096 {
 		t.Error("length", got.Result().ContentLength)
 	}
-	if !strings.HasPrefix(got.Result().Header.Get("etag"), "W/") {
-		t.Error("etag", got.Result().Header.Get("etag"))
+	if !strings.HasPrefix(got.Result().Header.Get("Etag"), "W/") {
+		t.Error("etag", got.Result().Header.Get("Etag"))
 	}
-	if got.Result().Header.Get("content-encoding") != "gzip" {
-		t.Error("gzip", got.Result().Header.Get("content-encoding"))
+	if got.Result().Header.Get("Content-Encoding") != "gzip" {
+		t.Error("gzip", got.Result().Header.Get("Content-Encoding"))
 	}
 
 	// not accept encoding
@@ -83,11 +83,11 @@ func TestDeflate(t *testing.T) {
 	if got2.Result().ContentLength != 4096 {
 		t.Error("length(decompress)", got2.Result().ContentLength)
 	}
-	if !strings.HasPrefix(got2.Result().Header.Get("etag"), "W/") {
-		t.Error("etag(decompress)", got2.Result().Header.Get("etag"))
+	if !strings.HasPrefix(got2.Result().Header.Get("Etag"), "W/") {
+		t.Error("etag(decompress)", got2.Result().Header.Get("Etag"))
 	}
-	if got2.Result().Header.Get("content-encoding") == "gzip" {
-		t.Error("gzip(decompress)", got2.Result().Header.Get("content-encoding"))
+	if got2.Result().Header.Get("Content-Encoding") == "gzip" {
+		t.Error("gzip(decompress)", got2.Result().Header.Get("Content-Encoding"))
 	}
 }
 
@@ -106,7 +106,7 @@ func TestIndex(t *testing.T) {
 		return
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://dummy.url.com/", bytes.NewBuffer([]byte{}))
-	req.Header.Add("accept-encoding", "br, gzip")
+	req.Header.Add("Accept-Encoding", "br, gzip")
 	got := httptest.NewRecorder()
 	hdl.ServeHTTP(got, req)
 	if got.Code != http.StatusOK {
@@ -132,7 +132,7 @@ func TestNotFound(t *testing.T) {
 		return
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://dummy.url.com/", bytes.NewBuffer([]byte{}))
-	req.Header.Add("accept-encoding", "br, gzip")
+	req.Header.Add("Accept-Encoding", "br, gzip")
 	got := httptest.NewRecorder()
 	hdl.ServeHTTP(got, req)
 	if got.Code != http.StatusNotFound {
