@@ -452,6 +452,37 @@ func TestZipCmdNoDel(t *testing.T) {
 	}
 }
 
+func TestZipCmdDelSitemap(t *testing.T) {
+	orig_global := globalOption
+	defer func() {
+		globalOption = orig_global
+	}()
+	dirname, zipname, err := zipcmd_helper_inittest(t)
+	if err != nil {
+		return
+	}
+	commands := []ZipCmd{
+		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+	}
+	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt", "sitemap.xml"}
+	for idx, cmd := range commands {
+		outfile := filepath.Join(t.TempDir(), fmt.Sprintf("output-%d.zip", idx))
+		globalOption.Archive = flags.Filename(outfile)
+		res := cmd.Execute([]string{dirname, zipname})
+		if res != nil {
+			t.Error("error", res, "idx", idx)
+		}
+		zipcmd_helper_check(t, outfile, expected)
+	}
+}
+
 func TestZipCmdSelfDel(t *testing.T) {
 	orig_global := globalOption
 	defer func() {
