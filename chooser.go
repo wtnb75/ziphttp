@@ -7,7 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"time"
 )
@@ -85,7 +85,7 @@ func (c DiffCRC) Less(i, j int) bool {
 }
 
 func NewChooseFileFromDir(root, name string) *ChooseFile {
-	realpath := path.Join(root, name)
+	realpath := filepath.Join(root, name)
 	st, err := os.Stat(realpath)
 	if err != nil {
 		return nil
@@ -168,23 +168,24 @@ func (c *ChooseFile) Open() (io.ReadCloser, error) {
 	if c.ZipFile != nil {
 		return c.ZipFile.Open()
 	}
-	return os.Open(path.Join(c.Root, c.Name))
+	return os.Open(filepath.Join(c.Root, c.Name))
 }
 
 func (c *ChooseFile) FixCRC() error {
 	if c.CRC32 != 0 || c.Root == "" {
 		return nil
 	}
-	fi, err := os.Open(path.Join(c.Root, c.Name))
+	fi, err := os.Open(filepath.Join(c.Root, c.Name))
 	if err != nil {
 		return err
 	}
 	defer fi.Close()
-	data, err := io.ReadAll(fi)
+	cksum := crc32.NewIEEE()
+	_, err = io.Copy(cksum, fi)
 	if err != nil {
-		return nil
+		return err
 	}
-	hashval := crc32.ChecksumIEEE(data)
+	hashval := cksum.Sum32()
 	slog.Debug("crc32", "name", c.Name, "value", hashval)
 	c.CRC32 = hashval
 	return nil

@@ -12,7 +12,7 @@ import (
 )
 
 func TestZipCmd(t *testing.T) {
-	fname := prepare(t)
+	fname := prepare_testzip(t)
 	defer os.Remove(fname)
 	zr0, err := zip.OpenReader(fname)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestZipCmd(t *testing.T) {
 }
 
 func TestZipCmdNormal(t *testing.T) {
-	fname := prepare(t)
+	fname := prepare_testzip(t)
 	defer os.Remove(fname)
 	zr0, err := zip.OpenReader(fname)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestZipCmdNormal(t *testing.T) {
 }
 
 func TestZipCmdSiteMap(t *testing.T) {
-	fname := prepare(t)
+	fname := prepare_testzip(t)
 	defer os.Remove(fname)
 	zr0, err := zip.OpenReader(fname)
 	if err != nil {

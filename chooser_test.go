@@ -1,6 +1,9 @@
 package main
 
 import (
+	"hash/crc32"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -109,5 +112,33 @@ func TestDiffCRC_choose_new(t *testing.T) {
 	res := ChooseFrom(input)
 	if res != input[0] {
 		t.Error("compress uncompressed size")
+	}
+}
+
+func TestFixCRC(t *testing.T) {
+	t.Parallel()
+	teststr := "hello world"
+	cksum := crc32.ChecksumIEEE([]byte(teststr))
+	td := t.TempDir()
+	tf := filepath.Join(td, "test.data")
+	fi, err := os.Create(tf)
+	if err != nil {
+		t.Error("file open")
+		return
+	}
+	written, err := fi.WriteString(teststr)
+	if err != nil {
+		t.Error("writestring", written, err)
+	}
+	fi.Close()
+	cf := ChooseFile{
+		Root: td,
+		Name: "test.data",
+	}
+	if err = cf.FixCRC(); err != nil {
+		t.Error("crc error", err)
+	}
+	if cksum != cf.CRC32 {
+		t.Error("crc32 mismatch", cksum, cf.CRC32)
 	}
 }
