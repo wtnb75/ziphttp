@@ -153,7 +153,7 @@ func ChooseFromNoCRC(input []*ChooseFile) *ChooseFile {
 	if n != len(input) {
 		slog.Error("copy failed?", "src", len(input), "dest", len(tmp))
 	}
-	sort.Sort(SameCRC(tmp))
+	sort.Sort(DiffCRC(tmp))
 	return tmp[0]
 }
 
