@@ -35,7 +35,6 @@ type ZipCmd struct {
 	first_key_root string
 	first_key_zip  *zip.ReadCloser
 	zip_to_read    []*zip.ReadCloser
-	asiszip        *zip.Writer
 	zipios         []ZipIO
 }
 
@@ -71,7 +70,11 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 			ofp.Close()
 			return nil, nil, err
 		}
-		defer cmd_fp.Close()
+		defer func() {
+			if err := cmd_fp.Close(); err != nil {
+				slog.Error("close cmd_fp", "command", cmd_exc, "error", err)
+			}
+		}()
 		written, err = io.Copy(ofp, cmd_fp)
 		if err != nil {
 			slog.Error("cmd copy", "name", cmd_exc, "dest", globalOption.Archive, "error", err, "written", written)
@@ -212,9 +215,6 @@ func (cmd *ZipCmd) validate(args []string) (err error) {
 		cmd.Parallel = uint(runtime.NumCPU())
 	}
 	slog.Info("parallel", "num", cmd.Parallel)
-	if cmd.Parallel == 1 && cmd.SortBy != "" && cmd.SortBy != "none" {
-		slog.Warn("non-parallel and sort is not supported", "sortby", cmd.SortBy, "parallel", cmd.Parallel)
-	}
 	if !cmd.NoCRC && cmd.BaseURL != "" {
 		slog.Warn("make url relative (--baseurl) without --no-crc is not supported", "baseurl", cmd.BaseURL, "nocrc", cmd.NoCRC)
 	}
@@ -343,57 +343,37 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 	return nil
 }
 
-func (cmd *ZipCmd) boot_workers(result_zip *zip.Writer, wgp *sync.WaitGroup) (jobs chan CompressWork, err error) {
+func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, tempdir string, err error) {
+	// 0-th zipio is for passthru, 1 to N-th zipio have workers
 	slog.Info("parallel", "num", cmd.Parallel)
-	var td string
 	jobs = make(chan CompressWork, 10)
 	cmd.zipios = make([]ZipIO, 0)
-	if cmd.Parallel <= 1 {
-		cmd.asiszip = result_zip
-		wgp.Add(1)
-		go CompressWorker("root", result_zip, jobs, wgp)
-	} else {
-		var asisfp ZipIO
-		if !cmd.InMemory {
-			td, err = os.MkdirTemp("", "")
-			if err != nil {
-				slog.Error("mkdirtemp", "error", err)
-				return
-			}
-			slog.Info("tmpdir", "name", td)
-			defer os.RemoveAll(td)
-			asisfp = NewFileZip(filepath.Join(td, "asis.zip"))
-		} else {
-			asisfp = NewMemZip()
-		}
-		defer asisfp.Close()
-		cmd.zipios = append(cmd.zipios, asisfp)
-		cmd.asiszip, err = asisfp.Writer()
+	if !cmd.InMemory {
+		tempdir, err = os.MkdirTemp("", "")
 		if err != nil {
-			slog.Error("asis writer", "name", "asis.zip", "error", err)
+			slog.Error("mkdirtemp", "error", err)
+			return
+		}
+		slog.Info("tmpdir", "name", tempdir)
+	}
+	for i := range cmd.Parallel + 1 {
+		var fi ZipIO
+		if !cmd.InMemory {
+			fi = NewFileZip(filepath.Join(tempdir, fmt.Sprintf("%d.zip", i)))
+		} else {
+			fi = NewMemZip()
+		}
+		cmd.zipios = append(cmd.zipios, fi)
+		var wr *zip.Writer
+		wr, err = fi.Writer()
+		if err != nil {
+			slog.Error("worker writer", "number", i)
 			return
 		}
 		if !cmd.UseNormal {
-			MakeZopfli(cmd.asiszip)
+			MakeZopfli(wr)
 		}
-		for i := range cmd.Parallel {
-			var fi ZipIO
-			if !cmd.InMemory {
-				fi = NewFileZip(filepath.Join(td, fmt.Sprintf("%d.zip", i)))
-			} else {
-				fi = NewMemZip()
-			}
-			defer fi.Close()
-			cmd.zipios = append(cmd.zipios, fi)
-			var wr *zip.Writer
-			wr, err = fi.Writer()
-			if err != nil {
-				slog.Error("worker writer", "number", i)
-				return
-			}
-			if !cmd.UseNormal {
-				MakeZopfli(wr)
-			}
+		if i != 0 {
 			wgp.Add(1)
 			go CompressWorker(fmt.Sprint(i), wr, jobs, wgp)
 		}
@@ -401,20 +381,39 @@ func (cmd *ZipCmd) boot_workers(result_zip *zip.Writer, wgp *sync.WaitGroup) (jo
 	return
 }
 
+func (cmd *ZipCmd) generate_sitemap(root *SiteMapRoot, zipwr *zip.Writer) error {
+	if cmd.SiteMap != "" {
+		slog.Info("generating sitemap", "num", len(root.SiteList))
+		fh := zip.FileHeader{
+			Name:     "sitemap.xml",
+			Method:   zip.Deflate,
+			Modified: root.LastMod(),
+		}
+		if wr, err := zipwr.CreateHeader(&fh); err != nil {
+			slog.Error("create sitemap", "error", err)
+			xmlstr, err := xml.Marshal(root)
+			if err != nil {
+				slog.Error("sitemap generate error", "error", err)
+				return err
+			}
+			written, err := wr.Write(xmlstr)
+			if err != nil {
+				slog.Error("write sitemap", "error", err, "written", written)
+				return err
+			}
+			slog.Debug("sitemap written", "written", written)
+			if err := zipwr.Flush(); err != nil {
+				slog.Error("sitemap flush", "error", err)
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (cmd *ZipCmd) Execute(args []string) (err error) {
 	init_log()
 	if err = cmd.validate(args); err != nil {
-		return err
-	}
-	ofp, zipfile, err := cmd.prepare_output()
-	if ofp != nil {
-		defer ofp.Close()
-	}
-	if zipfile != nil {
-		defer zipfile.Close()
-	}
-	if err != nil {
-		slog.Error("open output", "error", err)
 		return err
 	}
 	err = cmd.create_nametable(args)
@@ -431,11 +430,19 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 	}()
 	// boot workers
 	var wgp sync.WaitGroup
-	jobs, err := cmd.boot_workers(zipfile, &wgp)
+	jobs, tempdir, err := cmd.boot_workers(&wgp)
+	if tempdir != "" {
+		defer func() {
+			if err := os.RemoveAll(tempdir); err != nil {
+				slog.Error("tempdir remove", "name", tempdir, "error", err)
+			}
+		}()
+	}
 	if err != nil {
 		slog.Error("boot workers", "error", err)
 		return err
 	}
+	misc_writer, err := cmd.zipios[0].Writer()
 	// sitemap
 	sitemap := SiteMapRoot{}
 	if err := sitemap.initialize(); err != nil {
@@ -460,13 +467,11 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		} else {
 			slog.Debug("win-zip", "name", k, "name", target.Name)
 		}
-		if cmd.SiteMap != "" {
-			if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
-				slog.Error("sitemap error", "name", k, "error", err)
-			}
+		if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
+			slog.Error("sitemap error", "name", k, "error", err)
 		}
 		if cmd.UseAsIs {
-			if err := cmd.copy_asis(cmd.asiszip, k, target); err == nil {
+			if err := cmd.copy_asis(misc_writer, k, target); err == nil {
 				continue
 			} else {
 				slog.Debug("asis failed", "name", k, "error", err)
@@ -478,55 +483,53 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			return err
 		}
 	}
-	if cmd.SiteMap != "" {
-		slog.Info("generating sitemap", "num", len(sitemap.SiteList))
-		fh := zip.FileHeader{
-			Name:     "sitemap.xml",
-			Method:   zip.Deflate,
-			Modified: sitemap.LastMod(),
-		}
-		if wr, err := cmd.asiszip.CreateHeader(&fh); err != nil {
-			slog.Error("create sitemap", "error", err)
-			xmlstr, err := xml.Marshal(sitemap)
-			if err != nil {
-				slog.Error("sitemap generate error", "error", err)
-				return err
-			}
-			written, err := wr.Write(xmlstr)
-			if err != nil {
-				slog.Error("write sitemap", "error", err, "written", written)
-				return err
-			}
-			slog.Debug("sitemap written", "written", written)
-			if err := cmd.asiszip.Flush(); err != nil {
-				slog.Error("sitemap flush", "error", err)
-				return err
-			}
-		}
+	if err = cmd.generate_sitemap(&sitemap, misc_writer); err != nil {
+		slog.Error("sitemap generate", "error", err)
 	}
 	slog.Info("close jobs")
 	close(jobs)
 	slog.Info("before wait")
 	wgp.Wait()
-	if err = cmd.asiszip.Close(); err != nil {
-		slog.Error("close-asiszip", "error", err)
+	slog.Debug("close zipio[0]", "zipio[0]", cmd.zipios[0])
+	if err = misc_writer.Close(); err != nil {
+		slog.Error("misc writer close", "error", err)
+	}
+	if err = cmd.zipios[0].Close(); err != nil {
+		slog.Error("0-th zipio close", "error", err)
 	}
 	slog.Info("wait done")
-	if cmd.Parallel > 1 {
-		fileinzips := make([]*zip.File, 0)
-		for _, z := range cmd.zipios {
-			reader, err := z.Reader()
-			if err != nil {
-				slog.Error("open reader", "error", err)
-				return err
+	ofp, zipfile, err := cmd.prepare_output()
+	if ofp != nil {
+		defer func() {
+			if err := ofp.Close(); err != nil {
+				slog.Error("close ofp", "error", err)
 			}
-			fileinzips = append(fileinzips, reader.File...)
+		}()
+	}
+	if zipfile != nil {
+		defer func() {
+			if err := zipfile.Close(); err != nil {
+				slog.Error("close zipfile", "error", err)
+			}
+		}()
+	}
+	if err != nil {
+		slog.Error("open output", "error", err)
+		return err
+	}
+	fileinzips := make([]*zip.File, 0)
+	for idx, z := range cmd.zipios {
+		reader, err := z.Reader()
+		if err != nil {
+			slog.Error("open reader", "error", err, "idx", idx, "zipio", z)
+			return err
 		}
-		cmd.sort_files(fileinzips)
-		slog.Info("all files", "num", len(fileinzips))
-		if err = ZipPassThru(zipfile, fileinzips); err != nil {
-			slog.Error("ZipPassthru", "error", err)
-		}
+		fileinzips = append(fileinzips, reader.File...)
+	}
+	cmd.sort_files(fileinzips)
+	slog.Info("all files", "num", len(fileinzips))
+	if err = ZipPassThru(zipfile, fileinzips); err != nil {
+		slog.Error("ZipPassthru", "error", err)
 	}
 	return nil
 }

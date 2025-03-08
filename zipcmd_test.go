@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ func TestZipCmd(t *testing.T) {
 	for _, f := range zr0.File {
 		crcmap[f.Name] = f.CRC32
 	}
-	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("mktemp-d", err)
 		return
@@ -83,7 +84,7 @@ func TestZipCmdNormal(t *testing.T) {
 	for _, f := range zr0.File {
 		crcmap[f.Name] = f.CRC32
 	}
-	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("mktemp-d", err)
 		return
@@ -138,7 +139,7 @@ func TestZipCmdSiteMap(t *testing.T) {
 	for _, f := range zr0.File {
 		crcmap[f.Name] = f.CRC32
 	}
-	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("mktemp-d", err)
 		return
@@ -190,13 +191,13 @@ func TestZipcmdFromFile(t *testing.T) {
 	defer func() {
 		globalOption = orig_global
 	}()
-	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("mktemp-d", err)
 		return
 	}
 	defer os.Remove(tmpfile.Name())
-	inputfile, err := os.CreateTemp(os.TempDir(), "")
+	inputfile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("mktemp-d", err)
 		return
@@ -239,7 +240,7 @@ func TestZipcmdFromDir(t *testing.T) {
 	defer func() {
 		globalOption = orig_global
 	}()
-	tmpfile, err := os.CreateTemp(os.TempDir(), "")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Error("mktemp-d", err)
 		return
@@ -288,6 +289,9 @@ func TestZipcmdFromDir(t *testing.T) {
 
 func zipcmd_helper_inittest(t *testing.T) (dirname string, zipname string, err error) {
 	t.Helper()
+	testdata := "hello world\n"
+	hashval := crc32.ChecksumIEEE([]byte(testdata))
+	t.Log("hashval is", hashval)
 	base := t.TempDir()
 	if err = os.Mkdir(filepath.Join(base, "orgdir"), 0o755); err != nil {
 		t.Error("mkdir(orgdir)")
@@ -307,7 +311,7 @@ func zipcmd_helper_inittest(t *testing.T) (dirname string, zipname string, err e
 			return
 		}
 		var written int
-		if written, err = fp.WriteString("hello world\n"); err != nil {
+		if written, err = fp.WriteString(testdata); err != nil {
 			t.Error("testdata write", "error", err, "written", written)
 			return
 		}
@@ -325,7 +329,7 @@ func zipcmd_helper_inittest(t *testing.T) (dirname string, zipname string, err e
 			t.Error("create(zip)")
 		}
 		var written int
-		if written, err = w.Write([]byte("hello world\n")); err != nil {
+		if written, err = w.Write([]byte(testdata)); err != nil {
 			t.Error("testdata write", "written", written, "error", err)
 		}
 		if err = zw.Flush(); err != nil {
@@ -344,6 +348,7 @@ func zipcmd_helper_inittest(t *testing.T) (dirname string, zipname string, err e
 
 func zipcmd_helper_check(t *testing.T, zipfile string, expected []string) {
 	t.Helper()
+	t.Log("outfile", zipfile)
 	zr, err := zip.OpenReader(zipfile)
 	if err != nil {
 		t.Error("result open", zipfile, err)
@@ -361,6 +366,23 @@ func zipcmd_helper_check(t *testing.T, zipfile string, expected []string) {
 	for _, v := range expected {
 		if !strings.Contains(names, "<"+v+">") {
 			t.Error("not found", zipfile, v)
+		}
+	}
+	for _, v := range zr.File {
+		t.Log("name", v.Name, "checksum", v.CRC32)
+		rdc, err := v.Open()
+		if err != nil {
+			t.Error("cannot open", "name", v.Name, "error", err, "checksum", v.CRC32)
+		}
+		data, err := io.ReadAll(rdc)
+		if err != nil {
+			t.Error("cannot read", "name", v.Name, "error", err, "checksum", v.CRC32)
+		}
+		if len(data) != int(v.UncompressedSize64) {
+			t.Error("size mismatch", "name", v.Name, "read", len(data), "metadata", v.UncompressedSize64)
+		}
+		if err = rdc.Close(); err != nil {
+			t.Error("close error", "name", v.Name, "error", err)
 		}
 	}
 }
@@ -425,6 +447,7 @@ func TestZipCmdNoDel(t *testing.T) {
 		if res != nil {
 			t.Error("error", res, "idx", idx)
 		}
+		t.Log("command", idx, cmd)
 		zipcmd_helper_check(t, outfile, expected)
 	}
 }

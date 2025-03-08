@@ -52,6 +52,9 @@ func (r *SiteMapRoot) AddZip(baseurl string, fi *zip.File) error {
 }
 
 func (r *SiteMapRoot) AddFile(baseurl string, indexname string, filename string, updated time.Time) error {
+	if baseurl == "" {
+		return nil
+	}
 	u, err := url.JoinPath(baseurl, filename)
 	if err != nil {
 		slog.Error("joinpath", "base", baseurl, "name", filename)

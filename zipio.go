@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"os"
 )
 
@@ -10,6 +11,7 @@ type ZipIO interface {
 	Reader() (*zip.Reader, error)
 	Writer() (*zip.Writer, error)
 	Close() error
+	String() string
 }
 
 type FileZip struct {
@@ -56,6 +58,10 @@ func (f FileZip) Close() error {
 	return nil
 }
 
+func (f FileZip) String() string {
+	return "file:" + f.name
+}
+
 type MemZip struct {
 	fp *bytes.Buffer
 }
@@ -76,4 +82,8 @@ func (f MemZip) Writer() (*zip.Writer, error) {
 
 func (f MemZip) Close() error {
 	return nil
+}
+
+func (f MemZip) String() string {
+	return fmt.Sprintf("mem:size=%d", f.fp.Len())
 }

@@ -348,7 +348,7 @@ func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *syn
 			}
 			return
 		}
-		slog.Debug("work", "name", name, "job", job.Header.Name)
+		slog.Debug("work", "name", name, "job", job.Header.Name, "method", job.Header.Method)
 		fp, err := wr.CreateHeader(job.Header)
 		if err != nil {
 			slog.Error("CreateHeader", "name", job.Header.Name, "error", err)
@@ -359,9 +359,9 @@ func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *syn
 			slog.Error("Copy", "path", name, "url", job.MyURL, "error", err, "written", written)
 			return
 		}
-		slog.Debug("Copy", "path", name, "url", job.MyURL, "written", written)
+		slog.Debug("Copy", "path", name, "url", job.MyURL, "name", job.Header.Name, "written", written)
 		if err = wr.Flush(); err != nil {
-			slog.Error("flush", "path", name, "url", job.MyURL, "error", err)
+			slog.Error("flush", "path", name, "name", job.Header.Name, "url", job.MyURL, "error", err, "written", written)
 		}
 		clos := job.Reader.(io.ReadCloser)
 		if clos != nil {
