@@ -30,6 +30,7 @@ jobs:
       uses: becheran/go-testreport@main
       with:
         input: report.json
+      if: steps.lint.outcome == 'success'
     - name: coverage
       run: |
         echo "## coverage report" >> $GITHUB_STEP_SUMMARY
