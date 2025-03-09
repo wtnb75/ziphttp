@@ -424,6 +424,7 @@ type WebServer struct {
 	Headers           []string `short:"H" long:"header" description:"custom response headers"`
 	AutoReload        bool     `long:"autoreload" description:"detect zip file change and reload"`
 	SupportGzip       bool     `long:"support-gz" description:"support *.gz URL"`
+	OpenTelemetry     bool     `long:"opentelemetry" description:"otel trace setup"`
 	server            http.Server
 	handler           ZipHandler
 }
@@ -441,7 +442,6 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		headers:     make(map[string]string),
 		accesslog:   slog.With("type", "accesslog"),
 	}
-
 	if err = cmd.handler.initialize(archiveFilename(), cmd.InMemory); err != nil {
 		slog.Error("initialize failed", "error", err)
 		return err
@@ -473,7 +473,18 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		ReadHeaderTimeout: rhto,
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo),
 	}
-	http.Handle("/", &cmd.handler)
+	if cmd.OpenTelemetry {
+		stop, handler, err := cmd.init_otel(&cmd.handler, "ziphttp")
+		if err != nil {
+			slog.Warn("opentelemetry initialize failed", "error", err)
+			http.Handle("/", &cmd.handler)
+		} else {
+			defer stop()
+			http.Handle("/", handler)
+		}
+	} else {
+		http.Handle("/", &cmd.handler)
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
