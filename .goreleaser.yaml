@@ -64,7 +64,7 @@ docker_manifests:
     image_templates:
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-arm64"
        - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-amd64"
-       - "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-wasi"
+       #- "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-wasi"
 
 archives:
   - formats: ['binary']
