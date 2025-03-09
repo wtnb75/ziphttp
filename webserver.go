@@ -325,11 +325,11 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "not found")
 }
 
-func (h *ZipHandler) init2() {
-	h.deflmap = map[string]int{}
-	h.storemap = map[string]int{}
-	for i := 0; i < h.zipfile.Files(); i++ {
-		fi := h.zipfile.File(i)
+func (h *ZipHandler) init2(input ZipFile) {
+	deflmap := make(map[string]int, 0)
+	storemap := make(map[string]int, 0)
+	for i := 0; i < input.Files(); i++ {
+		fi := input.File(i)
 		offset, err := fi.DataOffset()
 		slog.Debug("file", "n", i, "offset", offset, "error", err)
 		switch {
@@ -338,31 +338,35 @@ func (h *ZipHandler) init2() {
 			continue
 		case fi.Method == zip.Deflate:
 			slog.Debug("isdeflate", "name", fi.Name)
-			h.deflmap[fi.Name] = i
+			deflmap[fi.Name] = i
 		default:
 			slog.Debug("store", "name", fi.Name, "method", fi.Method)
-			h.storemap[fi.Name] = i
+			storemap[fi.Name] = i
 		}
 	}
+	slog.Info("update zipfile", "daflate", len(deflmap), "stored", len(storemap), "total", input.Files())
+	h.rwlock.Lock()
+	defer h.rwlock.Unlock()
+	h.zipfile = input
+	h.deflmap = deflmap
+	h.storemap = storemap
 }
 
 func (h *ZipHandler) initialize_memory(input []byte) error {
-	var err error
-	h.zipfile, err = NewZipFileBytes(input)
+	zipfile, err := NewZipFileBytes(input)
 	if err != nil {
 		return err
 	}
-	h.init2()
+	h.init2(zipfile)
 	return nil
 }
 
 func (h *ZipHandler) initialize_file(archive string) error {
-	var err error
-	h.zipfile, err = NewZipFileFile(archive)
+	zipfile, err := NewZipFileFile(archive)
 	if err != nil {
 		return err
 	}
-	h.init2()
+	h.init2(zipfile)
 	return nil
 }
 
@@ -374,8 +378,6 @@ func (h *ZipHandler) Close() error {
 }
 
 func (h *ZipHandler) initialize(filename string, inmemory bool) error {
-	h.rwlock.Lock()
-	defer h.rwlock.Unlock()
 	if inmemory {
 		offs, err := ArchiveOffset(filename)
 		if err != nil {
