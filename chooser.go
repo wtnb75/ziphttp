@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -98,8 +99,9 @@ func NewChooseFileFromDir(root, name string) *ChooseFile {
 	}
 }
 
-func NewChooseFileFromZip(root *zip.ReadCloser, zf *zip.File) *ChooseFile {
+func NewChooseFileFromZip(zipname string, root *zip.ReadCloser, zf *zip.File) *ChooseFile {
 	return &ChooseFile{
+		Root:             zipname,
 		ZipRoot:          root,
 		ZipFile:          zf,
 		Name:             zf.Name,
@@ -110,7 +112,7 @@ func NewChooseFileFromZip(root *zip.ReadCloser, zf *zip.File) *ChooseFile {
 	}
 }
 
-func ChooseFrom(input []*ChooseFile) *ChooseFile {
+func ChooseFrom(input []*ChooseFile, baseurl string) *ChooseFile {
 	if len(input) == 0 {
 		return nil
 	}
@@ -121,7 +123,7 @@ func ChooseFrom(input []*ChooseFile) *ChooseFile {
 	group := map[uint32][]*ChooseFile{}
 	for _, v := range input {
 		if v.CRC32 == 0 {
-			if err := v.FixCRC(); err != nil {
+			if err := v.FixCRC(baseurl); err != nil {
 				slog.Error("cannot calculate CRC", "root", v.Root, "name", v.Name, "error", err)
 				continue
 			}
@@ -171,8 +173,8 @@ func (c *ChooseFile) Open() (io.ReadCloser, error) {
 	return os.Open(filepath.Join(c.Root, c.Name))
 }
 
-func (c *ChooseFile) FixCRC() error {
-	if c.CRC32 != 0 || c.Root == "" {
+func (c *ChooseFile) FixCRC(baseurl string) error {
+	if c.CRC32 != 0 || c.ZipRoot != nil {
 		return nil
 	}
 	fi, err := os.Open(filepath.Join(c.Root, c.Name))
@@ -181,9 +183,25 @@ func (c *ChooseFile) FixCRC() error {
 	}
 	defer fi.Close()
 	cksum := crc32.NewIEEE()
-	_, err = io.Copy(cksum, fi)
-	if err != nil {
-		return err
+	if baseurl != "" {
+		buf := bytes.Buffer{}
+		written, err := io.Copy(&buf, fi)
+		if err != nil {
+			slog.Error("copy to buf", "error", err, "written", written)
+			return err
+		}
+		if err = LinkRelative(baseurl, &buf, cksum); err != nil {
+			slog.Error("link relative", "error", err)
+			return err
+		}
+	} else {
+		var written int64
+		written, err = io.Copy(cksum, fi)
+		if err != nil {
+			slog.Error("copy to checksum", "error", err, "written", written)
+			return err
+		}
+		slog.Debug("copy to checksum", "written", written)
 	}
 	hashval := cksum.Sum32()
 	slog.Debug("crc32", "name", c.Name, "value", hashval)

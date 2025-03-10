@@ -31,11 +31,9 @@ type ZipCmd struct {
 	Reverse   bool     `short:"r" long:"reverse" description:"reversed order"`
 	InMemory  bool     `long:"in-memory" description:"do not use /tmp"`
 
-	nametable      map[string][]*ChooseFile
-	first_key_root string
-	first_key_zip  *zip.ReadCloser
-	zip_to_read    []*zip.ReadCloser
-	zipios         []ZipIO
+	nametable   map[string][]*ChooseFile
+	zip_to_read []*zip.ReadCloser
+	zipios      []ZipIO
 }
 
 func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
@@ -91,10 +89,7 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 	slog.Debug("setoffiset", "written", written)
 	zipfile.SetOffset(written)
 	if !cmd.UseNormal {
-		slog.Info("using zopfli compressor")
 		MakeZopfli(zipfile)
-	} else {
-		slog.Info("using normal compressor")
 	}
 	return ofp, zipfile, nil
 }
@@ -214,10 +209,6 @@ func (cmd *ZipCmd) validate(args []string) (err error) {
 	if cmd.Parallel == 0 {
 		cmd.Parallel = uint(runtime.NumCPU())
 	}
-	slog.Info("parallel", "num", cmd.Parallel)
-	if !cmd.NoCRC && cmd.BaseURL != "" {
-		slog.Warn("make url relative (--baseurl) without --no-crc is not supported", "baseurl", cmd.BaseURL, "nocrc", cmd.NoCRC)
-	}
 	return nil
 }
 
@@ -225,7 +216,6 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 	lock := sync.Mutex{}
 	var file_num uint
 	wg := sync.WaitGroup{}
-	first_key_set := false
 	cmd.nametable = make(map[string][]*ChooseFile, 0)
 	cmd.zip_to_read = make([]*zip.ReadCloser, 0)
 	for _, dirname := range args {
@@ -234,10 +224,6 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 			slog.Error("stat", "path", dirname, "error", err)
 		}
 		if st.IsDir() {
-			if !first_key_set {
-				cmd.first_key_root = dirname
-				first_key_set = true
-			}
 			// walk dir
 			wg.Add(1)
 			go func() {
@@ -283,10 +269,6 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 				slog.Error("zip open", "name", dirname, "error", err)
 			}
 			cmd.zip_to_read = append(cmd.zip_to_read, zipfile)
-			if !first_key_set {
-				cmd.first_key_zip = zipfile
-				first_key_set = true
-			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -300,7 +282,7 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 						continue
 					}
 					lock.Lock()
-					nameadd(cmd.nametable, fi.Name, NewChooseFileFromZip(zipfile, fi))
+					nameadd(cmd.nametable, fi.Name, NewChooseFileFromZip(dirname, zipfile, fi))
 					file_num++
 					lock.Unlock()
 				}
@@ -309,10 +291,6 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 			// single file
 			filename := filepath.Base(dirname)
 			root := filepath.Dir(dirname)
-			if !first_key_set {
-				cmd.first_key_root = root
-				first_key_set = true
-			}
 			lock.Lock()
 			nameadd(cmd.nametable, filename, NewChooseFileFromDir(root, filename))
 			file_num++
@@ -327,10 +305,7 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 		for k, v := range cmd.nametable {
 			if len(v) == 1 {
 				// is first?
-				if cmd.first_key_root != "" && v[0].Root == cmd.first_key_root {
-					to_del = append(to_del, k)
-				}
-				if cmd.first_key_zip != nil && v[0].ZipRoot == cmd.first_key_zip {
+				if v[0].Root == args[0] {
 					to_del = append(to_del, k)
 				}
 			}
@@ -345,7 +320,11 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 
 func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, tempdir string, err error) {
 	// 0-th zipio is for passthru, 1 to N-th zipio have workers
-	slog.Info("parallel", "num", cmd.Parallel)
+	if !cmd.UseNormal {
+		slog.Info("using zopfli compressor", "workers", cmd.Parallel)
+	} else {
+		slog.Info("normal compressor", "parallel", cmd.Parallel)
+	}
 	jobs = make(chan CompressWork, 10)
 	cmd.zipios = make([]ZipIO, 0)
 	if !cmd.InMemory {
@@ -454,19 +433,20 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		cmd.SiteMap = ""
 	}
 	// process nametable
+	selected := make(map[string]int, 0)
 	for k, v := range cmd.nametable {
 		slog.Debug("process", "name", k, "num", len(v))
 		var target *ChooseFile
 		if cmd.NoCRC {
 			target = ChooseFromNoCRC(v)
 		} else {
-			target = ChooseFrom(v)
+			target = ChooseFrom(v, cmd.BaseURL)
 		}
-		if target.Root != "" {
-			slog.Debug("win-file", "name", k, "root", target.Root, "name", target.Name)
-		} else {
-			slog.Debug("win-zip", "name", k, "name", target.Name)
+		slog.Debug("choose", "name", k, "root", target.Root, "name", target.Name)
+		if _, ok := selected[target.Root]; !ok {
+			selected[target.Root] = 0
 		}
+		selected[target.Root]++
 		if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
 			slog.Error("sitemap error", "name", k, "error", err)
 		}
@@ -483,6 +463,7 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 			return err
 		}
 	}
+	slog.Info("selected", "result", selected)
 	if err = cmd.generate_sitemap(&sitemap, misc_writer); err != nil {
 		slog.Error("sitemap generate", "error", err)
 	}
