@@ -18,6 +18,18 @@ builds:
       - amd64
       - arm64
       - wasm
+  - id: ziphttp-otel
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - otel
+    goos:
+      - linux
+      - wasip1
+    goarch:
+      - amd64
+      - arm64
+      - wasm
 
 dockers:
   - image_templates:
@@ -80,7 +92,7 @@ archives:
         formats: ['zip']
 
 snapshot:
-  version_template: "{{ .Tag }}"
+  version_template: "{{ .Branch }}"
 
 changelog:
   disable: true
