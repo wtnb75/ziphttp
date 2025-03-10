@@ -11,7 +11,7 @@ import (
 func TestEmpty(t *testing.T) {
 	t.Parallel()
 	input := []*ChooseFile{}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != nil {
 		t.Error("empty")
 	}
@@ -20,7 +20,7 @@ func TestEmpty(t *testing.T) {
 func TestSingle(t *testing.T) {
 	t.Parallel()
 	input := []*ChooseFile{{Root: "root"}}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != input[0] {
 		t.Error("single")
 	}
@@ -32,7 +32,7 @@ func TestSameCRC_csize(t *testing.T) {
 		{Root: "root100", Name: "name", CRC32: 123, CompressedSize: 10},
 		{Root: "root101", Name: "name", CRC32: 123, CompressedSize: 20},
 	}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != input[0] {
 		t.Error("compress size")
 	}
@@ -45,7 +45,7 @@ func TestSameCRC_choose_compressed(t *testing.T) {
 		{Root: "root101", Name: "name", CRC32: 123, CompressedSize: 20, UncompressedSize: 20},
 		{Root: "root102", Name: "name", CRC32: 123, CompressedSize: 30, UncompressedSize: 20},
 	}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != input[1] {
 		t.Error("compress size")
 	}
@@ -66,7 +66,7 @@ func TestSameCRC_choose_old(t *testing.T) {
 			ModTime: time.Unix(20, 0),
 		},
 	}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != input[1] {
 		t.Error("compress old")
 	}
@@ -87,7 +87,7 @@ func TestSameCRC_choose_big(t *testing.T) {
 			ModTime: time.Unix(20, 0),
 		},
 	}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != input[2] {
 		t.Error("compress uncompressed size")
 	}
@@ -109,7 +109,7 @@ func TestDiffCRC_choose_new(t *testing.T) {
 			ModTime: time.Unix(20, 0),
 		},
 	}
-	res := ChooseFrom(input)
+	res := ChooseFrom(input, "")
 	if res != input[0] {
 		t.Error("compress uncompressed size")
 	}
@@ -135,7 +135,7 @@ func TestFixCRC(t *testing.T) {
 		Root: td,
 		Name: "test.data",
 	}
-	if err = cf.FixCRC(); err != nil {
+	if err = cf.FixCRC(""); err != nil {
 		t.Error("crc error", err)
 	}
 	if cksum != cf.CRC32 {
