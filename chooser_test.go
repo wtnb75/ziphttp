@@ -142,3 +142,32 @@ func TestFixCRC(t *testing.T) {
 		t.Error("crc32 mismatch", cksum, cf.CRC32)
 	}
 }
+
+func TestFixCRCRelative(t *testing.T) {
+	t.Parallel()
+	teststr1 := `<html><head></head><body><a href="http://example.com/path/to/file">abcde</a></body></html>`
+	teststr2 := `<html><head></head><body><a href="../to/file">abcde</a></body></html>`
+	cksum := crc32.ChecksumIEEE([]byte(teststr2))
+	td := t.TempDir()
+	tf := filepath.Join(td, "test.html")
+	fi, err := os.Create(tf)
+	if err != nil {
+		t.Error("file open")
+		return
+	}
+	written, err := fi.WriteString(teststr1)
+	if err != nil {
+		t.Error("writestring", written, err)
+	}
+	fi.Close()
+	cf := ChooseFile{
+		Root: td,
+		Name: "test.html",
+	}
+	if err = cf.FixCRC("http://example.com/path/hello/index.html"); err != nil {
+		t.Error("crc error", err)
+	}
+	if cksum != cf.CRC32 {
+		t.Error("crc32 mismatch", cksum, cf.CRC32)
+	}
+}
