@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -184,13 +183,16 @@ func (c *ChooseFile) FixCRC(baseurl string) error {
 	defer fi.Close()
 	cksum := crc32.NewIEEE()
 	if baseurl != "" {
-		buf := bytes.Buffer{}
-		written, err := io.Copy(&buf, fi)
-		if err != nil {
-			slog.Error("copy to buf", "error", err, "written", written)
-			return err
-		}
-		if err = LinkRelative(baseurl, &buf, cksum); err != nil {
+		r, w := io.Pipe()
+		defer r.Close()
+		go func() {
+			defer w.Close()
+			written, err := io.Copy(w, fi)
+			if err != nil {
+				slog.Error("copy to buf", "error", err, "written", written)
+			}
+		}()
+		if err = LinkRelative(baseurl, r, cksum); err != nil {
 			slog.Error("link relative", "error", err)
 			return err
 		}
