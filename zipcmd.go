@@ -27,6 +27,7 @@ type ZipCmd struct {
 	Parallel  uint     `short:"p" long:"parallel" description:"parallel compression"`
 	Delete    bool     `long:"delete" description:"skip removed files"`
 	NoCRC     bool     `long:"no-crc" description:"do not use CRC32 to detect change"`
+	Last      bool     `long:"choose-last" description:"choose first of same as last"`
 	SortBy    string   `long:"sort-by" choice:"none" choice:"name" choice:"time" choice:"usize" choice:"csize"`
 	Reverse   bool     `short:"r" long:"reverse" description:"reversed order"`
 	InMemory  bool     `long:"in-memory" description:"do not use /tmp"`
@@ -439,6 +440,8 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		var target *ChooseFile
 		if cmd.NoCRC {
 			target = ChooseFromNoCRC(v)
+		} else if cmd.Last {
+			target = ChooseFromLast(v, cmd.BaseURL)
 		} else {
 			target = ChooseFrom(v, cmd.BaseURL)
 		}

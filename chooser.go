@@ -158,6 +158,30 @@ func ChooseFromNoCRC(input []*ChooseFile) *ChooseFile {
 	return tmp[0]
 }
 
+func ChooseFromLast(input []*ChooseFile, baseurl string) *ChooseFile {
+	if len(input) == 0 {
+		return nil
+	}
+	if len(input) == 1 {
+		return input[0]
+	}
+	chosen := input[len(input)-1]
+	if err := chosen.FixCRC(baseurl); err != nil {
+		slog.Error("cannot calculate crc", "file", chosen.Name, "error", err)
+		return chosen
+	}
+	for _, v := range input {
+		if err := v.FixCRC(baseurl); err != nil {
+			slog.Error("cannot calculate crc", "file", v.Name, "error", err)
+			continue
+		}
+		if v.CRC32 == chosen.CRC32 {
+			return v
+		}
+	}
+	return chosen
+}
+
 func (c *ChooseFile) OpenRaw() (io.Reader, error) {
 	if c.ZipFile != nil {
 		return c.ZipFile.OpenRaw()
