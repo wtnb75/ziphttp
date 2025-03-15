@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -413,6 +414,15 @@ func (h *ZipHandler) initialize(filename string, inmemory bool) error {
 	return nil
 }
 
+func do_listen(listen string) (net.Listener, error) {
+	protos := strings.SplitN(listen, ":", 2)
+	switch protos[0] {
+	case "unix", "tcp", "tcp4", "tcp6":
+		return net.Listen(protos[0], protos[1])
+	}
+	return net.Listen("tcp", listen)
+}
+
 type WebServer struct {
 	Listen            string   `short:"l" long:"listen" default:":3000" description:"listen address:port"`
 	IndexFilename     string   `long:"index" description:"index filename" default:"index.html"`
@@ -467,7 +477,6 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		}
 	}
 	cmd.server = http.Server{
-		Addr:              cmd.Listen,
 		Handler:           nil,
 		ReadTimeout:       rto,
 		ReadHeaderTimeout: rhto,
@@ -546,8 +555,13 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		}
 	}
 
-	slog.Info("server starting", "listen", cmd.server.Addr, "pid", os.Getpid())
-	err = cmd.server.ListenAndServe()
+	listener, err := do_listen(cmd.Listen)
+	if err != nil {
+		slog.Error("listen error", "error", err)
+		return err
+	}
+	slog.Info("server starting", "listen", listener.Addr(), "pid", os.Getpid())
+	err = cmd.server.Serve(listener)
 	if err != nil && err != http.ErrServerClosed {
 		slog.Error("listen error", "error", err)
 		return err
