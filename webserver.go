@@ -424,17 +424,19 @@ func do_listen(listen string) (net.Listener, error) {
 }
 
 type WebServer struct {
-	Listen            string   `short:"l" long:"listen" default:":3000" description:"listen address:port"`
-	IndexFilename     string   `long:"index" description:"index filename" default:"index.html"`
-	StripPrefix       string   `long:"stripprefix" description:"strip prefix from archive"`
-	AddPrefix         string   `long:"addprefix" description:"add prefix to URL path"`
-	ReadTimeout       string   `long:"read-timeout" default:"10s"`
-	ReadHeaderTimeout string   `long:"read-header-timeout" default:"10s"`
-	InMemory          bool     `long:"in-memory" description:"load zip to memory"`
-	Headers           []string `short:"H" long:"header" description:"custom response headers"`
-	AutoReload        bool     `long:"autoreload" description:"detect zip file change and reload"`
-	SupportGzip       bool     `long:"support-gz" description:"support *.gz URL"`
-	OpenTelemetry     bool     `long:"opentelemetry" description:"otel trace setup"`
+	Listen            string        `short:"l" long:"listen" default:":3000" description:"listen address:port"`
+	IndexFilename     string        `long:"index" description:"index filename" default:"index.html"`
+	StripPrefix       string        `long:"stripprefix" description:"strip prefix from archive"`
+	AddPrefix         string        `long:"addprefix" description:"add prefix to URL path"`
+	ReadTimeout       time.Duration `long:"read-timeout" default:"10s"`
+	ReadHeaderTimeout time.Duration `long:"read-header-timeout" default:"10s"`
+	WriteTimeout      time.Duration `long:"write-timeout" default:"30s"`
+	IdleTimeout       time.Duration `long:"idle-timeout" default:"10s"`
+	InMemory          bool          `long:"in-memory" description:"load zip to memory"`
+	Headers           []string      `short:"H" long:"header" description:"custom response headers"`
+	AutoReload        bool          `long:"autoreload" description:"detect zip file change and reload"`
+	SupportGzip       bool          `long:"support-gz" description:"support *.gz URL"`
+	OpenTelemetry     bool          `long:"opentelemetry" description:"otel trace setup"`
 	server            http.Server
 	handler           ZipHandler
 }
@@ -458,16 +460,6 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	}
 	defer cmd.handler.Close()
 	slog.Info("open success", "files", cmd.handler.zipfile.Files(), "deflate", len(cmd.handler.deflmap))
-	rto, err := time.ParseDuration(cmd.ReadTimeout)
-	if err != nil {
-		slog.Error("read timeout expression", "error", err)
-		return err
-	}
-	rhto, err := time.ParseDuration(cmd.ReadHeaderTimeout)
-	if err != nil {
-		slog.Error("read header timeout expression", "error", err)
-		return err
-	}
 	for _, hdr := range cmd.Headers {
 		if kv := strings.SplitN(hdr, ":", 2); len(kv) != 2 {
 			slog.Error("invalid header spec", "header", hdr)
@@ -478,8 +470,10 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	}
 	cmd.server = http.Server{
 		Handler:           nil,
-		ReadTimeout:       rto,
-		ReadHeaderTimeout: rhto,
+		ReadTimeout:       cmd.ReadTimeout,
+		ReadHeaderTimeout: cmd.ReadHeaderTimeout,
+		WriteTimeout:      cmd.WriteTimeout,
+		IdleTimeout:       cmd.IdleTimeout,
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo),
 	}
 	if cmd.OpenTelemetry {
