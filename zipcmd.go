@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 type ZipCmd struct {
@@ -31,6 +33,7 @@ type ZipCmd struct {
 	SortBy    string   `long:"sort-by" choice:"none" choice:"name" choice:"time" choice:"usize" choice:"csize"`
 	Reverse   bool     `short:"r" long:"reverse" description:"reversed order"`
 	InMemory  bool     `long:"in-memory" description:"do not use /tmp"`
+	Progress  bool     `long:"progress" description:"show progress bar"`
 
 	nametable   map[string][]*ChooseFile
 	zip_to_read []*zip.ReadCloser
@@ -391,6 +394,57 @@ func (cmd *ZipCmd) generate_sitemap(root *SiteMapRoot, zipwr *zip.Writer) error 
 	return nil
 }
 
+func (cmd *ZipCmd) compress_process(sitemap *SiteMapRoot, misc_writer *zip.Writer, jobs chan CompressWork) (err error) {
+	selected := make(map[string]int, 0)
+	var bar *progressbar.ProgressBar
+	if cmd.Progress {
+		bar = progressbar.Default(int64(len(cmd.nametable)), string(globalOption.Archive))
+		defer bar.Close()
+	}
+	for k, v := range cmd.nametable {
+		if bar != nil {
+			if err := bar.Add(1); err != nil {
+				slog.Error("progressbar error", "error", err)
+				bar = nil
+			}
+		}
+		slog.Debug("process", "name", k, "num", len(v))
+		var target *ChooseFile
+		if cmd.NoCRC {
+			target = ChooseFromNoCRC(v)
+		} else if cmd.Last {
+			target = ChooseFromLast(v, cmd.BaseURL)
+		} else {
+			target = ChooseFrom(v, cmd.BaseURL)
+		}
+		slog.Debug("choose", "name", k, "root", target.Root, "name", target.Name)
+		if _, ok := selected[target.Root]; !ok {
+			selected[target.Root] = 0
+		}
+		selected[target.Root]++
+		if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
+			slog.Error("sitemap error", "name", k, "error", err)
+		}
+		if cmd.UseAsIs {
+			if err := cmd.copy_asis(misc_writer, k, target); err == nil {
+				continue
+			} else {
+				slog.Debug("asis failed", "name", k, "error", err)
+			}
+		}
+		// re-compress
+		if err := cmd.copy_compress_job(jobs, k, target); err != nil {
+			slog.Error("compress failed", "name", k, "error", err)
+			return err
+		}
+	}
+	slog.Info("selected", "result", selected)
+	if err = cmd.generate_sitemap(sitemap, misc_writer); err != nil {
+		slog.Error("sitemap generate", "error", err)
+	}
+	return nil
+}
+
 func (cmd *ZipCmd) Execute(args []string) (err error) {
 	init_log()
 	if err = cmd.validate(args); err != nil {
@@ -434,45 +488,13 @@ func (cmd *ZipCmd) Execute(args []string) (err error) {
 		cmd.SiteMap = ""
 	}
 	// process nametable
-	selected := make(map[string]int, 0)
-	for k, v := range cmd.nametable {
-		slog.Debug("process", "name", k, "num", len(v))
-		var target *ChooseFile
-		if cmd.NoCRC {
-			target = ChooseFromNoCRC(v)
-		} else if cmd.Last {
-			target = ChooseFromLast(v, cmd.BaseURL)
-		} else {
-			target = ChooseFrom(v, cmd.BaseURL)
-		}
-		slog.Debug("choose", "name", k, "root", target.Root, "name", target.Name)
-		if _, ok := selected[target.Root]; !ok {
-			selected[target.Root] = 0
-		}
-		selected[target.Root]++
-		if err := sitemap.AddFile(cmd.SiteMap, "index.html", k, target.ModTime); err != nil {
-			slog.Error("sitemap error", "name", k, "error", err)
-		}
-		if cmd.UseAsIs {
-			if err := cmd.copy_asis(misc_writer, k, target); err == nil {
-				continue
-			} else {
-				slog.Debug("asis failed", "name", k, "error", err)
-			}
-		}
-		// re-compress
-		if err := cmd.copy_compress_job(jobs, k, target); err != nil {
-			slog.Error("compress failed", "name", k, "error", err)
-			return err
-		}
+	if err = cmd.compress_process(&sitemap, misc_writer, jobs); err != nil {
+		slog.Error("compress failed", "error", err)
+		return err
 	}
-	slog.Info("selected", "result", selected)
-	if err = cmd.generate_sitemap(&sitemap, misc_writer); err != nil {
-		slog.Error("sitemap generate", "error", err)
-	}
-	slog.Info("close jobs")
+	slog.Debug("close jobs")
 	close(jobs)
-	slog.Info("before wait")
+	slog.Debug("before wait")
 	wgp.Wait()
 	slog.Debug("close zipio[0]", "zipio[0]", cmd.zipios[0])
 	if err = misc_writer.Close(); err != nil {
