@@ -132,6 +132,7 @@ func (cmd *ZipCmd) copy_asis(output *zip.Writer, name string, input *ChooseFile)
 
 func (cmd *ZipCmd) copy_compress_job(jobs chan<- CompressWork, name string, input *ChooseFile) (err error) {
 	fh := input.Header()
+	fh.Name = name
 	fh.Method = zip.Deflate
 	if input.UncompressedSize < uint64(cmd.MinSize) {
 		fh.Method = zip.Store
@@ -245,19 +246,20 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 						slog.Debug("exclude-match", "path", path, "exclude", cmd.Exclude)
 						return nil
 					}
+					relpath, err := filepath.Rel(dirname, path)
+					if err != nil {
+						slog.Error("Relpath", "root", dirname, "path", path, "error", err)
+						return err
+					}
 					var archivepath string
 					if cmd.StripRoot {
-						archivepath, err = filepath.Rel(dirname, path)
-						if err != nil {
-							slog.Error("Relpath", "root", dirname, "path", path, "error", err)
-							return err
-						}
+						archivepath = relpath
 					} else {
 						archivepath = path
 					}
 					slog.Debug("archivepath", "root", dirname, "path", path, "apath", archivepath)
 					lock.Lock()
-					nameadd(cmd.nametable, archivepath, NewChooseFileFromDir(dirname, archivepath))
+					nameadd(cmd.nametable, archivepath, NewChooseFileFromDir(dirname, relpath))
 					file_num++
 					lock.Unlock()
 					return nil

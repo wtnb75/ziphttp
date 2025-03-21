@@ -88,6 +88,7 @@ func NewChooseFileFromDir(root, name string) *ChooseFile {
 	realpath := filepath.Join(root, name)
 	st, err := os.Stat(realpath)
 	if err != nil {
+		slog.Error("stat", "error", err)
 		return nil
 	}
 	return &ChooseFile{

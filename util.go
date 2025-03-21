@@ -183,7 +183,7 @@ func ArchiveOffset_Old(archivefile string) (int64, error) {
 func fix_link(here string, link string) string {
 	u, err := url.Parse(link)
 	if err != nil {
-		slog.Error("invalid url", "error", err, "url", link)
+		slog.Error("invalid url", "error", err, "url", link, "here", here)
 		return link
 	}
 	if u.User.String() != "" {
@@ -197,13 +197,13 @@ func fix_link(here string, link string) string {
 		return link
 	}
 	new_url := base.ResolveReference(u)
-	if new_url.Scheme == base.Scheme && new_url.Hostname() == base.Hostname() {
+	if new_url.Scheme == base.Scheme && new_url.Hostname() == base.Hostname() && new_url.Path != "" {
 		relpath, err := filepath.Rel(filepath.Dir(base.Path)+"/", new_url.Path)
 		if strings.HasSuffix(new_url.Path, "/") && !strings.HasSuffix(relpath, "/") {
 			relpath += "/"
 		}
 		if err != nil {
-			slog.Warn("filepath.Rel", "error", err, "base", base, "new", new_url)
+			slog.Warn("filepath.Rel", "error", err, "link", link, "base", base, "new", new_url, "path", new_url.Path)
 			return link
 		}
 		new_url.Host = ""
