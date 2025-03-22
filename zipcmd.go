@@ -38,6 +38,7 @@ type ZipCmd struct {
 	nametable   map[string][]*ChooseFile
 	zip_to_read []*zip.ReadCloser
 	zipios      []ZipIO
+	args        []string
 }
 
 func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
@@ -415,9 +416,29 @@ func (cmd *ZipCmd) compress_process(sitemap *SiteMapRoot, misc_writer *zip.Write
 		if cmd.NoCRC {
 			target = ChooseFromNoCRC(v)
 		} else if cmd.Last {
-			target = ChooseFromLast(v, cmd.BaseURL)
+			vv := make([]*ChooseFile, 0)
+			for _, i := range cmd.args {
+				for _, cf := range v {
+					if cf.Root == i {
+						vv = append(vv, cf)
+						break
+					}
+				}
+			}
+			if len(vv) != len(v) {
+				slog.Error("root not found?", "args", cmd.args, "vv", vv, "v", v)
+			}
+			baseurl, err := url.JoinPath(cmd.BaseURL, k)
+			if err != nil {
+				slog.Error("cannot join url", "baseurl", cmd.BaseURL, "path", k, "error", err)
+			}
+			target = ChooseFromLast(vv, baseurl)
 		} else {
-			target = ChooseFrom(v, cmd.BaseURL)
+			baseurl, err := url.JoinPath(cmd.BaseURL, k)
+			if err != nil {
+				slog.Error("cannot join url", "baseurl", cmd.BaseURL, "path", k, "error", err)
+			}
+			target = ChooseFrom(v, baseurl)
 		}
 		slog.Debug("choose", "name", k, "root", target.Root, "name", target.Name)
 		if _, ok := selected[target.Root]; !ok {
@@ -449,6 +470,7 @@ func (cmd *ZipCmd) compress_process(sitemap *SiteMapRoot, misc_writer *zip.Write
 
 func (cmd *ZipCmd) Execute(args []string) (err error) {
 	init_log()
+	cmd.args = args
 	if err = cmd.validate(args); err != nil {
 		return err
 	}
