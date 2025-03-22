@@ -95,6 +95,7 @@ type ZipHandler struct {
 	stripprefix string
 	addprefix   string
 	indexname   string
+	dirredirect bool
 	headers     map[string]string
 	deflmap     map[string]int
 	storemap    map[string]int
@@ -125,6 +126,16 @@ func (h *ZipHandler) filename(r *http.Request) string {
 	}
 	fname = strings.ReplaceAll(fname, "//", "/")
 	return strings.TrimPrefix(fname, "/")
+}
+
+func (h *ZipHandler) exists(path string) bool {
+	if _, ok := h.deflmap[path]; ok {
+		return true
+	}
+	if _, ok := h.storemap[path]; ok {
+		return true
+	}
+	return false
 }
 
 func (h *ZipHandler) handle_gzip(w http.ResponseWriter, filestr *zip.File, etag string) {
@@ -241,6 +252,12 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.rwlock.RLock()
 	defer h.rwlock.RUnlock()
 	fname := h.filename(r)
+	if h.dirredirect && !h.exists(fname) && h.exists(fname+"/"+h.indexname) {
+		slog.Info("directory redirect", "url", r.URL, "fname", fname)
+		w.Header().Set("Location", r.URL.Path+"/")
+		w.WriteHeader(http.StatusMovedPermanently)
+		return
+	}
 	if strings.HasSuffix(fname, ".gz") {
 		if idx, ok := h.deflmap[strings.TrimSuffix(fname, ".gz")]; ok {
 			slog.Debug("gzip file", "name", fname)
@@ -426,6 +443,7 @@ func do_listen(listen string) (net.Listener, error) {
 type WebServer struct {
 	Listen            string        `short:"l" long:"listen" default:":3000" description:"listen address:port"`
 	IndexFilename     string        `long:"index" description:"index filename" default:"index.html"`
+	DirRedirect       bool          `long:"directory-redirect" description:"auto redirect when missing '/'"`
 	StripPrefix       string        `long:"stripprefix" description:"strip prefix from archive"`
 	AddPrefix         string        `long:"addprefix" description:"add prefix to URL path"`
 	ReadTimeout       time.Duration `long:"read-timeout" default:"10s"`
@@ -449,6 +467,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		stripprefix: cmd.StripPrefix,
 		addprefix:   cmd.AddPrefix,
 		indexname:   cmd.IndexFilename,
+		dirredirect: cmd.DirRedirect,
 		deflmap:     make(map[string]int),
 		storemap:    make(map[string]int),
 		headers:     make(map[string]string),
