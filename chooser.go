@@ -171,12 +171,15 @@ func ChooseFromLast(input []*ChooseFile, baseurl string) *ChooseFile {
 		slog.Error("cannot calculate crc", "file", chosen.Name, "error", err)
 		return chosen
 	}
-	for _, v := range input {
+	slog.Debug("last crc", "value", chosen.CRC32)
+	for idx, v := range input {
 		if err := v.FixCRC(baseurl); err != nil {
 			slog.Error("cannot calculate crc", "file", v.Name, "error", err)
 			continue
 		}
+		slog.Debug("n-th crc", "n", idx, "value", v.CRC32)
 		if v.CRC32 == chosen.CRC32 {
+			slog.Debug("choose first", "root", v.Root)
 			return v
 		}
 	}
