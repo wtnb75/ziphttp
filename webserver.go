@@ -146,6 +146,7 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, filestr *zip.File, etag 
 	if etag != "" {
 		w.Header().Add("Etag", etag)
 	}
+	w.WriteHeader(http.StatusOK)
 	if written, err := CopyGzip(w, filestr); err != nil {
 		slog.Error("copygzip", "written", written, "error", err)
 	} else {
@@ -154,9 +155,6 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, filestr *zip.File, etag 
 }
 
 func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filestr *zip.File, etag string) {
-	if etag != "" {
-		w.Header().Add("Etag", etag)
-	}
 	f, err := filestr.Open()
 	if err != nil {
 		slog.Info("open failed", "path", urlpath, "error", err)
@@ -174,6 +172,10 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filest
 	slog.Debug("normal response", "length", filestr.UncompressedSize64)
 	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
 	w.Header().Add("Content-Length", strconv.FormatUint(filestr.UncompressedSize64, 10))
+	if etag != "" {
+		w.Header().Add("Etag", etag)
+	}
+	w.WriteHeader(http.StatusOK)
 	if written, err := io.Copy(w, f); err != nil {
 		slog.Error("copy error", "error", err, "written", written)
 	} else {
@@ -322,6 +324,9 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
 		}
 		ctype := make_contenttype(fi.Comment)
+		if ctype == "" {
+			ctype = make_contentbyext(fname)
+		}
 		if ctype != "" {
 			w.Header().Set("Content-Type", ctype)
 		}
