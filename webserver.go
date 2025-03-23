@@ -221,7 +221,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			for k, v := range w.Header() {
 				switch strings.ToLower(k) {
-				case "etag", "content-type", "content-encoding":
+				case "etag", "content-type", "content-encoding", "location":
 					headers = append(headers, strings.ToLower(k), v[0])
 				case "content-length":
 					if val, err := strconv.Atoi(v[0]); err != nil {
@@ -253,9 +253,10 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.rwlock.RUnlock()
 	fname := h.filename(r)
 	if h.dirredirect && !h.exists(fname) && h.exists(fname+"/"+h.indexname) {
+		statuscode = http.StatusMovedPermanently
 		slog.Info("directory redirect", "url", r.URL, "fname", fname)
 		w.Header().Set("Location", r.URL.Path+"/")
-		w.WriteHeader(http.StatusMovedPermanently)
+		w.WriteHeader(statuscode)
 		return
 	}
 	if strings.HasSuffix(fname, ".gz") {
