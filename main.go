@@ -28,7 +28,7 @@ func archiveFilename() string {
 }
 
 func init_log() {
-	var level slog.Level = slog.LevelInfo
+	var level = slog.LevelInfo
 	if globalOption.Verbose {
 		level = slog.LevelDebug
 	} else if globalOption.Quiet {
