@@ -243,8 +243,14 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				switch strings.ToLower(k) {
 				case "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto":
 					headers = append(headers, strings.TrimPrefix(strings.ToLower(k), "x-"), v[0])
-				case "forwarded", "user-agent", "if-none-match", "referer":
+				case "forwarded", "user-agent", "if-none-match", "referer", "accept-encoding":
 					headers = append(headers, strings.ToLower(k), v[0])
+				case "if-modified-since":
+					if ts, err := time.Parse(http.TimeFormat, v[0]); err != nil {
+						headers = append(headers, "if-modified-since", v[0])
+					} else {
+						headers = append(headers, "if-modified-since", ts)
+					}
 				}
 			}
 			h.accesslog.Info(
