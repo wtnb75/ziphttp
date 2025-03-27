@@ -56,6 +56,7 @@ func realMain() int {
 		{Name: "testlink", Short: "test link rewrite", Long: "test rewrite link to relative", Data: &LinkCommand{}},
 		{Name: "zipsort", Short: "sort zip", Long: "sort zip by name", Data: &ZipSort{}},
 		{Name: "zip", Short: "create zip", Long: "create new archive from dir/file/zip", Data: &ZipCmd{}},
+		{Name: "version", Short: "show version", Long: "show version and exit", Data: &VersionCmd{}},
 	}
 	parser := flags.NewParser(&globalOption, flags.Default)
 	for _, cmd := range commands {
