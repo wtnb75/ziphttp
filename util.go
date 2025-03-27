@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andybalholm/brotli"
 	"github.com/foobaz/go-zopfli/zopfli"
 	"golang.org/x/net/html"
 )
@@ -413,10 +414,33 @@ func (d *DeflateWriteCloser) Close() error {
 	return zopfli.DeflateCompress(&d.opts, d.buf.Bytes(), d.output)
 }
 
-func MakeZopfli(zipfile *zip.Writer) {
+func MakeZopfliWriter(zipfile *zip.Writer) {
 	zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
 		opts := zopfli.DefaultOptions()
 		dc := DeflateWriteCloser{opts: opts, output: out}
 		return &dc, nil
+	})
+}
+
+const (
+	Brotli = 91
+	Zstd   = 93
+)
+
+func MakeBrotliWriter(zipfile *zip.Writer) {
+	zipfile.RegisterCompressor(Brotli, func(out io.Writer) (io.WriteCloser, error) {
+		return brotli.NewWriter(out), nil
+	})
+}
+
+func MakeBrotliReader(zipfile *zip.Reader) {
+	zipfile.RegisterDecompressor(Brotli, func(input io.Reader) io.ReadCloser {
+		return io.NopCloser(brotli.NewReader(input))
+	})
+}
+
+func MakeBrotliReadCloser(zipfile *zip.ReadCloser) {
+	zipfile.RegisterDecompressor(Brotli, func(input io.Reader) io.ReadCloser {
+		return io.NopCloser(brotli.NewReader(input))
 	})
 }

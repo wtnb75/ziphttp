@@ -38,9 +38,9 @@ func TestZipCmd(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 
 	zz := ZipCmd{
-		Exclude:   []string{"128m*"}, // skip 128mb.txt
-		MinSize:   513,               // do not compress 512b.txt
-		UseNormal: false,
+		Exclude: []string{"128m*"}, // skip 128mb.txt
+		MinSize: 513,               // do not compress 512b.txt
+		Method:  "zopfli",
 	}
 	globalOption.Archive = flags.Filename(tmpfile.Name())
 	err = zz.Execute([]string{fname})
@@ -92,9 +92,9 @@ func TestZipCmdNormal(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 
 	zz := ZipCmd{
-		Exclude:   []string{"128m*"}, // skip 128mb.txt
-		MinSize:   513,               // do not compress 512b.txt
-		UseNormal: true,
+		Exclude: []string{"128m*"}, // skip 128mb.txt
+		MinSize: 513,               // do not compress 512b.txt
+		Method:  "deflate",
 	}
 	globalOption.Archive = flags.Filename(tmpfile.Name())
 	err = zz.Execute([]string{fname})
@@ -147,11 +147,11 @@ func TestZipCmdSiteMap(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 
 	zz := ZipCmd{
-		Exclude:   []string{"128m*"}, // skip 128mb.txt
-		MinSize:   513,               // do not compress 512b.txt
-		UseNormal: true,
-		SiteMap:   "http://example.com/path/",
-		BaseURL:   "http://example.com/path/",
+		Exclude: []string{"128m*"}, // skip 128mb.txt
+		MinSize: 513,               // do not compress 512b.txt
+		Method:  "deflate",
+		SiteMap: "http://example.com/path/",
+		BaseURL: "http://example.com/path/",
 	}
 	globalOption.Archive = flags.Filename(tmpfile.Name())
 	err = zz.Execute([]string{fname})
@@ -397,14 +397,14 @@ func TestZipCmdDel(t *testing.T) {
 		return
 	}
 	commands := []ZipCmd{
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
 	}
 	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt"}
 	for idx, cmd := range commands {
@@ -428,14 +428,14 @@ func TestZipCmdNoDel(t *testing.T) {
 		return
 	}
 	commands := []ZipCmd{
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
 	}
 	expected := []string{
 		"name0.txt", "name1.txt", "name2.txt", "indir/name0.txt",
@@ -462,14 +462,14 @@ func TestZipCmdDelSitemap(t *testing.T) {
 		return
 	}
 	commands := []ZipCmd{
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
 	}
 	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt", "sitemap.xml"}
 	for idx, cmd := range commands {
@@ -494,14 +494,14 @@ func TestZipCmdSelfDel(t *testing.T) {
 		return
 	}
 	commands := []ZipCmd{
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 1, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
 	}
 	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt"}
 	for idx, cmd := range commands {
@@ -527,14 +527,14 @@ func TestZipCmdSelfNoDel(t *testing.T) {
 		return
 	}
 	commands := []ZipCmd{
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 1, Delete: false, SortBy: "name"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: true, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
-		{StripRoot: true, UseNormal: true, UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 1, Delete: false, SortBy: "name"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 1, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
 	}
 	expected := []string{
 		"name0.txt", "name1.txt", "name2.txt", "indir/name0.txt",

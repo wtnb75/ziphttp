@@ -20,9 +20,9 @@ import (
 type ZipCmd struct {
 	StripRoot bool     `short:"s" long:"strip-root" description:"strip root path"`
 	Exclude   []string `short:"x" long:"exclude" description:"exclude files"`
-	Stored    []string `short:"n" long:"stored" description:"non compress patterns"`
+	Stored    []string `short:"n" long:"store" description:"non compress patterns"`
 	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
-	UseNormal bool     `long:"no-zopfli" description:"do not use zopfli compress"`
+	Method    string   `long:"method" choice:"deflate" choice:"zopfli" choice:"brotli" choice:"store" default:"zopfli" description:"compression method"`
 	UseAsIs   bool     `long:"asis" description:"copy as-is from zipfile"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
 	SiteMap   string   `long:"sitemap" description:"generate sitemap.xml"`
@@ -35,6 +35,7 @@ type ZipCmd struct {
 	InMemory  bool     `long:"in-memory" description:"do not use /tmp"`
 	Progress  bool     `long:"progress" description:"show progress bar"`
 
+	method      uint16
 	nametable   map[string][]*ChooseFile
 	zip_to_read []*zip.ReadCloser
 	zipios      []ZipIO
@@ -93,8 +94,11 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 	zipfile := zip.NewWriter(ofp)
 	slog.Debug("setoffiset", "written", written)
 	zipfile.SetOffset(written)
-	if !cmd.UseNormal {
-		MakeZopfli(zipfile)
+	switch cmd.Method {
+	case "zopfli":
+		MakeZopfliWriter(zipfile)
+	case "brotli":
+		MakeBrotliWriter(zipfile)
 	}
 	return ofp, zipfile, nil
 }
@@ -134,7 +138,7 @@ func (cmd *ZipCmd) copy_asis(output *zip.Writer, name string, input *ChooseFile)
 func (cmd *ZipCmd) copy_compress_job(jobs chan<- CompressWork, name string, input *ChooseFile) (err error) {
 	fh := input.Header()
 	fh.Name = name
-	fh.Method = zip.Deflate
+	fh.Method = cmd.method
 	if input.UncompressedSize < uint64(cmd.MinSize) {
 		fh.Method = zip.Store
 	}
@@ -214,6 +218,15 @@ func (cmd *ZipCmd) sort_files(files []*zip.File) {
 func (cmd *ZipCmd) validate(args []string) (err error) {
 	if cmd.Parallel == 0 {
 		cmd.Parallel = uint(runtime.NumCPU())
+	}
+	switch cmd.Method {
+	case "brotli":
+		cmd.method = Brotli
+		slog.Warn("incompatible compressor", "method", cmd.Method)
+	case "store":
+		cmd.method = zip.Store
+	default:
+		cmd.method = zip.Deflate
 	}
 	return nil
 }
@@ -327,10 +340,15 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 
 func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, tempdir string, err error) {
 	// 0-th zipio is for passthru, 1 to N-th zipio have workers
-	if !cmd.UseNormal {
+	switch cmd.Method {
+	case "zopfli":
 		slog.Info("using zopfli compressor", "workers", cmd.Parallel)
-	} else {
-		slog.Info("normal compressor", "parallel", cmd.Parallel)
+	case "brotli":
+		slog.Info("using brotli compressor", "workers", cmd.Parallel)
+	case "store":
+		slog.Info("using no compressor", "workers", cmd.Parallel)
+	case "deflate":
+		slog.Info("using normal compressor", "workers", cmd.Parallel)
 	}
 	jobs = make(chan CompressWork, 10)
 	cmd.zipios = make([]ZipIO, 0)
@@ -356,8 +374,11 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 			slog.Error("worker writer", "number", i)
 			return
 		}
-		if !cmd.UseNormal {
-			MakeZopfli(wr)
+		switch cmd.Method {
+		case "zopfli":
+			MakeZopfliWriter(wr)
+		case "brotli":
+			MakeBrotliWriter(wr)
 		}
 		if i != 0 {
 			wgp.Add(1)

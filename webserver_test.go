@@ -17,8 +17,7 @@ func TestStored(t *testing.T) {
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "index.html",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[uint16]map[string]int),
 	}
 	if err := hdl.initialize_memory(testzip); err != nil {
 		t.Error("initialize", err)
@@ -49,8 +48,7 @@ func TestDeflate(t *testing.T) {
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "index.html",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[uint16]map[string]int),
 	}
 	if err := hdl.initialize_memory(testzip); err != nil {
 		t.Error("initialize", err)
@@ -98,8 +96,7 @@ func TestIndex(t *testing.T) {
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "512b.txt",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[uint16]map[string]int),
 	}
 	if err := hdl.initialize_memory(testzip); err != nil {
 		t.Error("initialize", err)
@@ -124,8 +121,7 @@ func TestNotFound(t *testing.T) {
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "index.html",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[uint16]map[string]int),
 	}
 	if err := hdl.initialize_memory(testzip); err != nil {
 		t.Error("initialize", err)

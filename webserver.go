@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/jessevdk/go-flags"
 )
 
 type ZipFile interface {
@@ -57,6 +58,7 @@ func NewZipFileBytes(input []byte) (*ZipFileBytes, error) {
 	if err != nil {
 		return nil, err
 	}
+	MakeBrotliReader(z)
 	res := ZipFileBytes{z: z}
 	return &res, nil
 }
@@ -86,6 +88,7 @@ func NewZipFileFile(name string) (*ZipFileFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	MakeBrotliReadCloser(z)
 	res := ZipFileFile{z: z}
 	return &res, nil
 }
@@ -97,22 +100,48 @@ type ZipHandler struct {
 	indexname   string
 	dirredirect bool
 	headers     map[string]string
-	deflmap     map[string]int
-	storemap    map[string]int
+	methodmap   map[uint16]map[string]int
 	rwlock      sync.RWMutex
 	accesslog   *slog.Logger
 }
 
-func (h *ZipHandler) accept_encoding(r *http.Request) ([]string, bool) {
-	has_gzip := false
+type Encoding int
+
+const (
+	EncodingGzip Encoding = 1 << iota
+	EncodingCompress
+	EncodingDeflate
+	EncodingBrotli
+	EncodingIdentity
+	EncodingZstd
+	EncodingAny
+)
+
+func (h *ZipHandler) accept_encoding(r *http.Request) Encoding {
+	var res Encoding = 0
 	encodings := strings.Split(r.Header.Get("Accept-Encoding"), ",")
-	for i := range encodings {
-		encodings[i] = strings.TrimSpace(encodings[i])
-		if encodings[i] == "gzip" {
-			has_gzip = true
+	for _, enc := range encodings {
+		encs := strings.Split(enc, ";")
+		switch strings.TrimSpace(encs[0]) {
+		case "gzip", "x-gzip":
+			res |= EncodingGzip
+		case "compress", "x-compress":
+			res |= EncodingCompress
+		case "deflate":
+			res |= EncodingDeflate
+		case "br":
+			res |= EncodingBrotli
+		case "identity":
+			res |= EncodingIdentity
+		case "zstd":
+			res |= EncodingZstd
+		case "*":
+			res |= EncodingAny
+		default:
+			slog.Info("unknown encoding", "encoding", enc, "header", encodings)
 		}
 	}
-	return encodings, has_gzip
+	return res
 }
 
 func (h *ZipHandler) filename(r *http.Request) string {
@@ -129,29 +158,106 @@ func (h *ZipHandler) filename(r *http.Request) string {
 }
 
 func (h *ZipHandler) exists(path string) bool {
-	if _, ok := h.deflmap[path]; ok {
-		return true
-	}
-	if _, ok := h.storemap[path]; ok {
-		return true
+	for _, v := range h.methodmap {
+		if _, ok := v[path]; ok {
+			return true
+		}
 	}
 	return false
 }
 
-func (h *ZipHandler) handle_gzip(w http.ResponseWriter, filestr *zip.File, etag string) {
-	slog.Debug("compressed response", "length", filestr.CompressedSize64, "original", filestr.UncompressedSize64)
-	w.Header().Add("Content-Encoding", "gzip")
-	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
-	w.Header().Add("Content-Length", strconv.FormatUint(filestr.CompressedSize64+18, 10))
-	if etag != "" {
-		w.Header().Add("Etag", etag)
+func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, fname string, statuscode *int) error {
+	if idx, ok := h.methodmap[zip.Deflate][fname]; ok {
+		fi := h.zipfile.File(idx)
+		if fi.Flags&0x1 == 1 {
+			// encrypted
+			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
+		}
+		// fast path
+		ctype := make_contenttype(fi.Comment)
+		if ctype == "" {
+			ctype = make_contentbyext(fname)
+		}
+		if ctype != "" {
+			w.Header().Set("Content-Type", ctype)
+		}
+		for k, v := range h.headers {
+			w.Header().Set(k, v)
+		}
+		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
+		if conditional(r, etag, fi) {
+			*statuscode = http.StatusNotModified
+			w.Header().Add("Etag", etag)
+			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
+			w.WriteHeader(*statuscode)
+			return nil
+		}
+		slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64)
+		w.Header().Add("Content-Encoding", "gzip")
+		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
+		w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64+18, 10))
+		if etag != "" {
+			w.Header().Add("Etag", etag)
+		}
+		*statuscode = http.StatusOK
+		w.WriteHeader(*statuscode)
+		if written, err := CopyGzip(w, fi); err != nil {
+			slog.Error("copygzip", "written", written, "error", err)
+		} else {
+			slog.Debug("written", "written", written)
+		}
+		return nil
 	}
-	w.WriteHeader(http.StatusOK)
-	if written, err := CopyGzip(w, filestr); err != nil {
-		slog.Error("copygzip", "written", written, "error", err)
-	} else {
-		slog.Debug("written", "written", written)
+	return fmt.Errorf("not found")
+}
+
+func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, method uint16, encoding string, fname string, statuscode *int) error {
+	if idx, ok := h.methodmap[method][fname]; ok {
+		fi := h.zipfile.File(idx)
+		if fi.Flags&0x1 == 1 {
+			// encrypted
+			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
+		}
+		// fast path
+		rd, err := fi.OpenRaw()
+		if err != nil {
+			return err
+		}
+		ctype := make_contenttype(fi.Comment)
+		if ctype == "" {
+			ctype = make_contentbyext(fname)
+		}
+		if ctype != "" {
+			w.Header().Set("Content-Type", ctype)
+		}
+		for k, v := range h.headers {
+			w.Header().Set(k, v)
+		}
+		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
+		if conditional(r, etag, fi) {
+			*statuscode = http.StatusNotModified
+			w.Header().Add("Etag", etag)
+			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
+			w.WriteHeader(*statuscode)
+			return nil
+		}
+		slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64)
+		w.Header().Add("Content-Encoding", encoding)
+		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
+		w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64, 10))
+		if etag != "" {
+			w.Header().Add("Etag", etag)
+		}
+		*statuscode = http.StatusOK
+		w.WriteHeader(*statuscode)
+		if written, err := io.Copy(w, rd); err != nil {
+			slog.Error("copy", "written", written, "error", err)
+		} else {
+			slog.Debug("written", "written", written)
+		}
+		return nil
 	}
+	return fmt.Errorf("not found")
 }
 
 func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filestr *zip.File, etag string) {
@@ -243,7 +349,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				switch strings.ToLower(k) {
 				case "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto":
 					headers = append(headers, strings.TrimPrefix(strings.ToLower(k), "x-"), v[0])
-				case "forwarded", "user-agent", "if-none-match", "referer", "accept-encoding":
+				case "forwarded", "user-agent", "if-none-match", "referer", "accept-encoding", "range":
 					headers = append(headers, strings.ToLower(k), v[0])
 				case "if-modified-since":
 					if ts, err := time.Parse(http.TimeFormat, v[0]); err != nil {
@@ -268,7 +374,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasSuffix(fname, ".gz") {
-		if idx, ok := h.deflmap[strings.TrimSuffix(fname, ".gz")]; ok {
+		if idx, ok := h.methodmap[zip.Deflate][strings.TrimSuffix(fname, ".gz")]; ok {
 			slog.Debug("gzip file", "name", fname)
 			fi := h.zipfile.File(idx)
 			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
@@ -282,48 +388,40 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	encodings, has_gzip := h.accept_encoding(r)
-	if has_gzip {
-		slog.Debug("gzip encoding supported", "header", encodings)
-	}
+	encodings := h.accept_encoding(r)
 	slog.Debug("name", "uri", r.URL.Path, "name", fname)
-	if has_gzip {
-		if idx, ok := h.deflmap[fname]; ok {
-			fi := h.zipfile.File(idx)
-			if fi.Flags&0x1 == 1 {
-				// encrypted
-				slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
-			}
-			// fast path
-			ctype := make_contenttype(fi.Comment)
-			if ctype == "" {
-				ctype = make_contentbyext(fname)
-			}
-			if ctype != "" {
-				w.Header().Set("Content-Type", ctype)
-			}
-			for k, v := range h.headers {
-				w.Header().Set(k, v)
-			}
-			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
-			if conditional(r, etag, fi) {
-				statuscode = http.StatusNotModified
-				w.Header().Add("Etag", etag)
-				w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
-				w.WriteHeader(statuscode)
-				return
-			}
-			h.handle_gzip(w, fi, etag)
+	if encodings&EncodingGzip != 0 {
+		slog.Debug("gzip encoding supported", "encodings", encodings)
+		if h.handle_gzip(w, r, fname, &statuscode) == nil {
 			return
 		}
 		// pass through
 	}
-	// slow path
-	idx, ok := h.deflmap[fname]
-	if !ok {
-		idx, ok = h.storemap[fname]
+	if encodings&EncodingBrotli != 0 {
+		slog.Debug("brotli encoding supported", "encodings", encodings)
+		if h.handle_raw(w, r, Brotli, "br", fname, &statuscode) == nil {
+			return
+		}
+		// pass through
 	}
-	if ok {
+	/*
+		if encodings&EncodingZstd != 0 {
+			slog.Debug("zstd encoding supported", "encodings", encodings)
+			if h.handle_raw(w, r, Zstd, "zstd", fname, &statuscode) == nil {
+				return
+			}
+			// pass through
+		}
+	*/
+	var idx = -1
+	for _, v := range h.methodmap {
+		if i, ok := v[fname]; ok {
+			idx = i
+			break
+		}
+	}
+	// fallback
+	if idx != -1 {
 		fi := h.zipfile.File(idx)
 		if fi.Flags&0x1 == 1 {
 			// encrypted
@@ -356,30 +454,28 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ZipHandler) init2(input ZipFile) {
-	deflmap := make(map[string]int, 0)
-	storemap := make(map[string]int, 0)
+	methodmap := make(map[uint16]map[string]int, 0)
 	for i := 0; i < input.Files(); i++ {
 		fi := input.File(i)
 		offset, err := fi.DataOffset()
 		slog.Debug("file", "n", i, "offset", offset, "error", err)
-		switch {
-		case fi.FileInfo().IsDir():
+		if fi.FileInfo().IsDir() {
 			slog.Debug("isdir", "name", fi.Name)
 			continue
-		case fi.Method == zip.Deflate:
-			slog.Debug("isdeflate", "name", fi.Name)
-			deflmap[fi.Name] = i
-		default:
-			slog.Debug("store", "name", fi.Name, "method", fi.Method)
-			storemap[fi.Name] = i
 		}
+		if _, ok := methodmap[fi.Method]; !ok {
+			methodmap[fi.Method] = make(map[string]int, 0)
+		}
+		slog.Debug("makemap", "name", fi.Name, "method", fi.Method, "idx", i)
+		methodmap[fi.Method][fi.Name] = i
 	}
-	slog.Info("update zipfile", "daflate", len(deflmap), "stored", len(storemap), "total", input.Files())
+	for i, v := range methodmap {
+		slog.Info("by method", "method", i, "num", len(v))
+	}
 	h.rwlock.Lock()
 	defer h.rwlock.Unlock()
 	h.zipfile = input
-	h.deflmap = deflmap
-	h.storemap = storemap
+	h.methodmap = methodmap
 }
 
 func (h *ZipHandler) initialize_memory(input []byte) error {
@@ -453,20 +549,21 @@ func do_listen(listen string) (net.Listener, error) {
 }
 
 type WebServer struct {
-	Listen            string        `short:"l" long:"listen" default:":3000" description:"listen address:port"`
-	IndexFilename     string        `long:"index" description:"index filename" default:"index.html"`
-	DirRedirect       bool          `long:"directory-redirect" description:"auto redirect when missing '/'"`
-	StripPrefix       string        `long:"stripprefix" description:"strip prefix from archive"`
-	AddPrefix         string        `long:"addprefix" description:"add prefix to URL path"`
-	ReadTimeout       time.Duration `long:"read-timeout" default:"10s"`
-	ReadHeaderTimeout time.Duration `long:"read-header-timeout" default:"10s"`
-	WriteTimeout      time.Duration `long:"write-timeout" default:"30s"`
-	IdleTimeout       time.Duration `long:"idle-timeout" default:"10s"`
-	InMemory          bool          `long:"in-memory" description:"load zip to memory"`
-	Headers           []string      `short:"H" long:"header" description:"custom response headers"`
-	AutoReload        bool          `long:"autoreload" description:"detect zip file change and reload"`
-	SupportGzip       bool          `long:"support-gz" description:"support *.gz URL"`
-	OpenTelemetry     bool          `long:"opentelemetry" description:"otel trace setup"`
+	Listen            string           `short:"l" long:"listen" default:":3000" description:"listen address:port"`
+	AltZipName        []flags.Filename `long:"add" description:"add zip name"`
+	IndexFilename     string           `long:"index" description:"index filename" default:"index.html"`
+	DirRedirect       bool             `long:"directory-redirect" description:"auto redirect when missing '/'"`
+	StripPrefix       string           `long:"stripprefix" description:"strip prefix from archive"`
+	AddPrefix         string           `long:"addprefix" description:"add prefix to URL path"`
+	ReadTimeout       time.Duration    `long:"read-timeout" default:"10s"`
+	ReadHeaderTimeout time.Duration    `long:"read-header-timeout" default:"10s"`
+	WriteTimeout      time.Duration    `long:"write-timeout" default:"30s"`
+	IdleTimeout       time.Duration    `long:"idle-timeout" default:"10s"`
+	InMemory          bool             `long:"in-memory" description:"load zip to memory"`
+	Headers           []string         `short:"H" long:"header" description:"custom response headers"`
+	AutoReload        bool             `long:"autoreload" description:"detect zip file change and reload"`
+	SupportGzip       bool             `long:"support-gz" description:"support *.gz URL"`
+	OpenTelemetry     bool             `long:"opentelemetry" description:"otel trace setup"`
 	server            http.Server
 	handler           ZipHandler
 }
@@ -480,8 +577,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		addprefix:   cmd.AddPrefix,
 		indexname:   cmd.IndexFilename,
 		dirredirect: cmd.DirRedirect,
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[uint16]map[string]int),
 		headers:     make(map[string]string),
 		accesslog:   slog.With("type", "accesslog"),
 	}
@@ -490,7 +586,7 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 		return err
 	}
 	defer cmd.handler.Close()
-	slog.Info("open success", "files", cmd.handler.zipfile.Files(), "deflate", len(cmd.handler.deflmap))
+	slog.Info("open success", "files", cmd.handler.zipfile.Files(), "deflate", len(cmd.handler.methodmap[zip.Deflate]))
 	for _, hdr := range cmd.Headers {
 		if kv := strings.SplitN(hdr, ":", 2); len(kv) != 2 {
 			slog.Error("invalid header spec", "header", hdr)
