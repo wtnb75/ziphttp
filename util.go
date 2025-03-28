@@ -423,23 +423,25 @@ func MakeZopfliWriter(zipfile *zip.Writer) {
 }
 
 const (
-	Brotli = 91
-	Zstd   = 93
+	Brotli uint16 = 0xff99
+	Zstd   uint16 = 93
 )
 
-func MakeBrotliWriter(zipfile *zip.Writer) {
+type MyZipWriter interface {
+	RegisterCompressor(uint16, zip.Compressor)
+}
+
+type MyZipReader interface {
+	RegisterDecompressor(uint16, zip.Decompressor)
+}
+
+func MakeBrotliWriter(zipfile MyZipWriter) {
 	zipfile.RegisterCompressor(Brotli, func(out io.Writer) (io.WriteCloser, error) {
 		return brotli.NewWriter(out), nil
 	})
 }
 
-func MakeBrotliReader(zipfile *zip.Reader) {
-	zipfile.RegisterDecompressor(Brotli, func(input io.Reader) io.ReadCloser {
-		return io.NopCloser(brotli.NewReader(input))
-	})
-}
-
-func MakeBrotliReadCloser(zipfile *zip.ReadCloser) {
+func MakeBrotliReader(zipfile MyZipReader) {
 	zipfile.RegisterDecompressor(Brotli, func(input io.Reader) io.ReadCloser {
 		return io.NopCloser(brotli.NewReader(input))
 	})

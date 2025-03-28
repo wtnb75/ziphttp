@@ -88,7 +88,7 @@ func NewZipFileFile(name string) (*ZipFileFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	MakeBrotliReadCloser(z)
+	MakeBrotliReader(z)
 	res := ZipFileFile{z: z}
 	return &res, nil
 }
