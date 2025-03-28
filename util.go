@@ -414,7 +414,15 @@ func (d *DeflateWriteCloser) Close() error {
 	return zopfli.DeflateCompress(&d.opts, d.buf.Bytes(), d.output)
 }
 
-func MakeZopfliWriter(zipfile *zip.Writer) {
+type MyZipWriter interface {
+	RegisterCompressor(uint16, zip.Compressor)
+}
+
+type MyZipReader interface {
+	RegisterDecompressor(uint16, zip.Decompressor)
+}
+
+func MakeZopfliWriter(zipfile MyZipWriter) {
 	zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
 		opts := zopfli.DefaultOptions()
 		dc := DeflateWriteCloser{opts: opts, output: out}
@@ -426,14 +434,6 @@ const (
 	Brotli uint16 = 0xff99
 	Zstd   uint16 = 93
 )
-
-type MyZipWriter interface {
-	RegisterCompressor(uint16, zip.Compressor)
-}
-
-type MyZipReader interface {
-	RegisterDecompressor(uint16, zip.Decompressor)
-}
 
 func MakeBrotliWriter(zipfile MyZipWriter) {
 	zipfile.RegisterCompressor(Brotli, func(out io.Writer) (io.WriteCloser, error) {

@@ -94,13 +94,13 @@ func NewZipFileFile(name string) (*ZipFileFile, error) {
 }
 
 type ZipHandler struct {
-	zipfile     ZipFile
+	zipfiles    []ZipFile
 	stripprefix string
 	addprefix   string
 	indexname   string
 	dirredirect bool
 	headers     map[string]string
-	methodmap   map[uint16]map[string]int
+	methodmap   map[string]map[uint16]int
 	rwlock      sync.RWMutex
 	accesslog   *slog.Logger
 }
@@ -158,25 +158,38 @@ func (h *ZipHandler) filename(r *http.Request) string {
 }
 
 func (h *ZipHandler) exists(path string) bool {
-	for _, v := range h.methodmap {
-		if _, ok := v[path]; ok {
-			return true
-		}
+	if _, ok := h.methodmap[path]; ok {
+		return true
 	}
 	return false
 }
 
-func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, fname string, statuscode *int) error {
-	if idx, ok := h.methodmap[zip.Deflate][fname]; ok {
-		fi := h.zipfile.File(idx)
+func (h *ZipHandler) getidx(idx int) *zip.File {
+	for _, zf := range h.zipfiles {
+		if idx < zf.Files() {
+			return zf.File(idx)
+		}
+		idx -= zf.Files()
+	}
+	slog.Error("cannot find index", "idx", idx, "files", len(h.zipfiles))
+	return nil
+}
+
+func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, statuscode *int) error {
+	if idx, ok := filemap[zip.Deflate]; ok {
+		fi := h.getidx(idx)
+		if fi == nil {
+			slog.Error("cannot find", "idx", idx)
+			return fmt.Errorf("internal error")
+		}
 		if fi.Flags&0x1 == 1 {
 			// encrypted
-			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
+			slog.Warn("encrypted", "name", fi.Name, "flag", fi.Flags)
 		}
 		// fast path
 		ctype := make_contenttype(fi.Comment)
 		if ctype == "" {
-			ctype = make_contentbyext(fname)
+			ctype = make_contentbyext(fi.Name)
 		}
 		if ctype != "" {
 			w.Header().Set("Content-Type", ctype)
@@ -211,9 +224,9 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, fname s
 	return fmt.Errorf("not found")
 }
 
-func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, method uint16, encoding string, fname string, statuscode *int) error {
-	if idx, ok := h.methodmap[method][fname]; ok {
-		fi := h.zipfile.File(idx)
+func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, method uint16, encoding string, fname string, statuscode *int) error {
+	if idx, ok := filemap[method]; ok {
+		fi := h.getidx(idx)
 		if fi.Flags&0x1 == 1 {
 			// encrypted
 			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
@@ -374,9 +387,13 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasSuffix(fname, ".gz") {
-		if idx, ok := h.methodmap[zip.Deflate][strings.TrimSuffix(fname, ".gz")]; ok {
+		if idx, ok := h.methodmap[strings.TrimSuffix(fname, ".gz")][zip.Deflate]; ok {
 			slog.Debug("gzip file", "name", fname)
-			fi := h.zipfile.File(idx)
+			fi := h.getidx(idx)
+			if fi == nil {
+				slog.Error("cannot find", "idx", idx)
+				return
+			}
 			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 			w.Header().Set("Content-Type", "application/gzip")
 			w.Header().Set("Etag", etag+"_gz")
@@ -388,20 +405,35 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	filebyenc, ok := h.methodmap[fname]
+	if !ok {
+		statuscode = http.StatusNotFound
+		w.WriteHeader(statuscode)
+		fmt.Fprint(w, "not found")
+	}
 	encodings := h.accept_encoding(r)
 	slog.Debug("name", "uri", r.URL.Path, "name", fname)
-	if encodings&EncodingGzip != 0 {
-		slog.Debug("gzip encoding supported", "encodings", encodings)
-		if h.handle_gzip(w, r, fname, &statuscode) == nil {
-			return
-		}
-		// pass through
-	}
 	if encodings&EncodingBrotli != 0 {
 		slog.Debug("brotli encoding supported", "encodings", encodings)
-		if h.handle_raw(w, r, Brotli, "br", fname, &statuscode) == nil {
+		if h.handle_raw(w, r, filebyenc, Brotli, "br", fname, &statuscode) == nil {
 			return
 		}
+		slog.Debug("brotli file not found", "name", fname)
+		// pass through
+	}
+	if encodings&EncodingGzip != 0 {
+		slog.Debug("gzip encoding supported", "encodings", encodings)
+		if h.handle_gzip(w, r, filebyenc, &statuscode) == nil {
+			return
+		}
+		slog.Debug("gzip file not found", "name", fname)
+		// pass through
+	} else if encodings&EncodingDeflate != 0 {
+		slog.Debug("deflate encoding supported", "encodings", encodings)
+		if h.handle_raw(w, r, filebyenc, zip.Deflate, "deflate", fname, &statuscode) == nil {
+			return
+		}
+		slog.Debug("deflate file not found", "name", fname)
 		// pass through
 	}
 	/*
@@ -413,125 +445,177 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// pass through
 		}
 	*/
-	var idx = -1
-	for _, v := range h.methodmap {
-		if i, ok := v[fname]; ok {
-			idx = i
-			break
-		}
-	}
 	// fallback
-	if idx != -1 {
-		fi := h.zipfile.File(idx)
-		if fi.Flags&0x1 == 1 {
-			// encrypted
-			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
-		}
-		ctype := make_contenttype(fi.Comment)
-		if ctype == "" {
-			ctype = make_contentbyext(fname)
-		}
-		if ctype != "" {
-			w.Header().Set("Content-Type", ctype)
-		}
-		for k, v := range h.headers {
-			w.Header().Set(k, v)
-		}
-		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
-		if conditional(r, etag, fi) {
-			statuscode = http.StatusNotModified
-			w.Header().Add("Etag", etag)
-			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
-			w.WriteHeader(statuscode)
-			return
-		}
-		h.handle_normal(w, r.URL.Path, fi, etag)
+	var idx = -1
+	for _, v := range filebyenc {
+		idx = v
+		break
+	}
+	if idx == -1 {
+		slog.Error("no encoding", "name", fname, "num", len(filebyenc))
+		statuscode = http.StatusInternalServerError
+		w.WriteHeader(statuscode)
+		fmt.Fprint(w, "internal server error")
 		return
 	}
-	statuscode = http.StatusNotFound
-	w.WriteHeader(statuscode)
-	fmt.Fprint(w, "not found")
+	fi := h.getidx(idx)
+	if fi == nil {
+		slog.Error("cannot find", "idx", idx)
+		return
+	}
+	if fi.Flags&0x1 == 1 {
+		// encrypted
+		slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
+	}
+	ctype := make_contenttype(fi.Comment)
+	if ctype == "" {
+		ctype = make_contentbyext(fname)
+	}
+	if ctype != "" {
+		w.Header().Set("Content-Type", ctype)
+	}
+	for k, v := range h.headers {
+		w.Header().Set(k, v)
+	}
+	etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
+	if conditional(r, etag, fi) {
+		statuscode = http.StatusNotModified
+		w.Header().Add("Etag", etag)
+		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
+		w.WriteHeader(statuscode)
+		return
+	}
+	h.handle_normal(w, r.URL.Path, fi, etag)
 }
 
-func (h *ZipHandler) init2(input ZipFile) {
-	methodmap := make(map[uint16]map[string]int, 0)
-	for i := 0; i < input.Files(); i++ {
-		fi := input.File(i)
-		offset, err := fi.DataOffset()
-		slog.Debug("file", "n", i, "offset", offset, "error", err)
-		if fi.FileInfo().IsDir() {
-			slog.Debug("isdir", "name", fi.Name)
-			continue
+func (h *ZipHandler) init2(inputs []ZipFile) {
+	methodmap := make(map[string]map[uint16]int, 0)
+	var cur = 0
+	count := make(map[uint16]int, 0)
+	for _, input := range inputs {
+		for i := 0; i < input.Files(); i++ {
+			fi := input.File(i)
+			offset, err := fi.DataOffset()
+			slog.Debug("file", "n", i, "offset", offset, "error", err)
+			if fi.FileInfo().IsDir() {
+				slog.Debug("isdir", "name", fi.Name)
+				continue
+			}
+			if _, ok := count[fi.Method]; !ok {
+				count[fi.Method] = 0
+			}
+			count[fi.Method]++
+			if _, ok := methodmap[fi.Name]; !ok {
+				methodmap[fi.Name] = make(map[uint16]int, 0)
+			}
+			if oldidx, ok := methodmap[fi.Name][fi.Method]; ok {
+				slog.Debug("duplicate", "name", fi.Name, "method", fi.Method, "idx", oldidx)
+			} else {
+				methodmap[fi.Name][fi.Method] = cur + i
+			}
 		}
-		if _, ok := methodmap[fi.Method]; !ok {
-			methodmap[fi.Method] = make(map[string]int, 0)
+		cur += input.Files()
+	}
+	// integrity check
+	for fname, bymethod := range methodmap {
+		var crc32 uint32 = 0
+		for method, idx := range bymethod {
+			fi := func(idx int, inputs []ZipFile) *zip.File {
+				for _, zf := range inputs {
+					if idx < zf.Files() {
+						return zf.File(idx)
+					}
+					idx -= zf.Files()
+				}
+				return nil
+			}(idx, inputs)
+			if fi == nil {
+				slog.Error("not found", "name", fname, "idx", idx)
+			}
+			if crc32 == 0 {
+				crc32 = fi.CRC32
+			} else if crc32 != fi.CRC32 {
+				slog.Warn("crc mismatch", "name", fname, "other32", crc32, "method", method, "crc32", fi.CRC32)
+			}
 		}
-		slog.Debug("makemap", "name", fi.Name, "method", fi.Method, "idx", i)
-		methodmap[fi.Method][fi.Name] = i
 	}
-	for i, v := range methodmap {
-		slog.Info("by method", "method", i, "num", len(v))
-	}
+	slog.Info("by method", "count", count)
 	h.rwlock.Lock()
 	defer h.rwlock.Unlock()
-	h.zipfile = input
+	h.zipfiles = inputs
 	h.methodmap = methodmap
 }
 
-func (h *ZipHandler) initialize_memory(input []byte) error {
-	zipfile, err := NewZipFileBytes(input)
-	if err != nil {
-		return err
+func (h *ZipHandler) initialize_memory(input [][]byte) error {
+	zipfiles := make([]ZipFile, 0)
+	for _, v := range input {
+		zipfile, err := NewZipFileBytes(v)
+		if err != nil {
+			return err
+		}
+		zipfiles = append(zipfiles, zipfile)
 	}
-	h.init2(zipfile)
+	h.init2(zipfiles)
 	return nil
 }
 
-func (h *ZipHandler) initialize_file(archive string) error {
-	zipfile, err := NewZipFileFile(archive)
-	if err != nil {
-		return err
+func (h *ZipHandler) initialize_file(input []string) error {
+	zipfiles := make([]ZipFile, 0)
+	for _, v := range input {
+		zipfile, err := NewZipFileFile(v)
+		if err != nil {
+			return err
+		}
+		zipfiles = append(zipfiles, zipfile)
 	}
-	h.init2(zipfile)
+	h.init2(zipfiles)
 	return nil
 }
 
 func (h *ZipHandler) Close() error {
-	if h.zipfile != nil {
-		return h.zipfile.Close()
+	for _, v := range h.zipfiles {
+		if v != nil {
+			if err := v.Close(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-func (h *ZipHandler) initialize(filename string, inmemory bool) error {
+func (h *ZipHandler) initialize(filenames []string, inmemory bool) error {
 	if inmemory {
-		offs, err := ArchiveOffset(filename)
-		if err != nil {
-			slog.Error("archiveoffset", "file", filename, "error", err)
-			return err
+		bufs := make([][]byte, 0)
+		for _, filename := range filenames {
+			offs, err := ArchiveOffset(filename)
+			if err != nil {
+				slog.Error("archiveoffset", "file", filename, "error", err)
+				return err
+			}
+			fp, err := os.Open(filename)
+			if err != nil {
+				slog.Error("open file to memory", "file", filename, "error", err)
+				return err
+			}
+			if _, err = fp.Seek(offs, io.SeekStart); err != nil {
+				slog.Error("seek", "file", filename, "error", err)
+				return err
+			}
+			buf, err := io.ReadAll(fp)
+			if err != nil {
+				slog.Error("read file to memory", "file", filename, "error", err)
+				return err
+			}
+			fp.Close()
+			bufs = append(bufs, buf)
+			slog.Debug("memory size", "file", filenames, "size", len(buf))
 		}
-		fp, err := os.Open(filename)
-		if err != nil {
-			slog.Error("open file to memory", "file", filename, "error", err)
-			return err
-		}
-		if _, err = fp.Seek(offs, io.SeekStart); err != nil {
-			slog.Error("seek", "file", filename, "error", err)
-			return err
-		}
-		buf, err := io.ReadAll(fp)
-		if err != nil {
-			slog.Error("read file to memory", "file", filename, "error", err)
-			return err
-		}
-		fp.Close()
-		slog.Debug("memory size", "file", filename, "size", len(buf))
-		if err = h.initialize_memory(buf); err != nil {
+		if err := h.initialize_memory(bufs); err != nil {
 			slog.Error("initialize failed", "err", err)
 			return err
 		}
 	} else {
-		if err := h.initialize_file(filename); err != nil {
+		if err := h.initialize_file(filenames); err != nil {
 			slog.Error("initialize failed", "err", err)
 			return err
 		}
@@ -572,21 +656,26 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	init_log()
 	slog.Info("args", "args", args)
 	cmd.handler = ZipHandler{
-		zipfile:     nil,
+		zipfiles:    make([]ZipFile, 0),
 		stripprefix: cmd.StripPrefix,
 		addprefix:   cmd.AddPrefix,
 		indexname:   cmd.IndexFilename,
 		dirredirect: cmd.DirRedirect,
-		methodmap:   make(map[uint16]map[string]int),
+		methodmap:   make(map[string]map[uint16]int),
 		headers:     make(map[string]string),
 		accesslog:   slog.With("type", "accesslog"),
 	}
-	if err = cmd.handler.initialize(archiveFilename(), cmd.InMemory); err != nil {
+	files := make([]string, 0)
+	files = append(files, archiveFilename())
+	for _, fn := range cmd.AltZipName {
+		files = append(files, string(fn))
+	}
+	if err = cmd.handler.initialize(files, cmd.InMemory); err != nil {
 		slog.Error("initialize failed", "error", err)
 		return err
 	}
 	defer cmd.handler.Close()
-	slog.Info("open success", "files", cmd.handler.zipfile.Files(), "deflate", len(cmd.handler.methodmap[zip.Deflate]))
+	slog.Info("open success", "files", len(cmd.handler.methodmap), "archives", len(files))
 	for _, hdr := range cmd.Headers {
 		if kv := strings.SplitN(hdr, ":", 2); len(kv) != 2 {
 			slog.Error("invalid header spec", "header", hdr)
@@ -697,6 +786,11 @@ func (cmd *WebServer) Shutdown() error {
 }
 
 func (cmd *WebServer) Reload() error {
-	slog.Info("reloading archive", "name", archiveFilename(), "inmemory", cmd.InMemory)
-	return cmd.handler.initialize(archiveFilename(), cmd.InMemory)
+	files := make([]string, 0)
+	files = append(files, archiveFilename())
+	for _, fn := range cmd.AltZipName {
+		files = append(files, string(fn))
+	}
+	slog.Info("reloading archive", "name", files, "inmemory", cmd.InMemory)
+	return cmd.handler.initialize(files, cmd.InMemory)
 }
