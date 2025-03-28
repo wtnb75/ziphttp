@@ -175,12 +175,12 @@ func (h *ZipHandler) getidx(idx int) *zip.File {
 	return nil
 }
 
-func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, statuscode *int) error {
-	if idx, ok := filemap[zip.Deflate]; ok {
+func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, method uint16, encoding string, addsz uint64, statuscode *int) (*zip.File, error) {
+	if idx, ok := filemap[method]; ok {
 		fi := h.getidx(idx)
 		if fi == nil {
 			slog.Error("cannot find", "idx", idx)
-			return fmt.Errorf("internal error")
+			return nil, fmt.Errorf("internal error")
 		}
 		if fi.Flags&0x1 == 1 {
 			// encrypted
@@ -203,17 +203,30 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap
 			w.Header().Add("Etag", etag)
 			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 			w.WriteHeader(*statuscode)
-			return nil
+			return nil, nil
 		}
-		slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64)
-		w.Header().Add("Content-Encoding", "gzip")
+		if encoding != "" {
+			slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64, "encoding", encoding)
+			w.Header().Add("Content-Encoding", encoding)
+		}
 		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
-		w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64+18, 10))
+		w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64+addsz, 10))
 		if etag != "" {
 			w.Header().Add("Etag", etag)
 		}
 		*statuscode = http.StatusOK
 		w.WriteHeader(*statuscode)
+		return fi, nil
+	}
+	return nil, fmt.Errorf("not found")
+}
+
+func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, statuscode *int) error {
+	fi, err := h.handle_pre(w, r, filemap, zip.Deflate, "gzip", 18, statuscode)
+	if err != nil {
+		return err
+	}
+	if fi != nil {
 		if written, err := CopyGzip(w, fi); err != nil {
 			slog.Error("copygzip", "written", written, "error", err)
 		} else {
@@ -225,44 +238,15 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap
 }
 
 func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, method uint16, encoding string, fname string, statuscode *int) error {
-	if idx, ok := filemap[method]; ok {
-		fi := h.getidx(idx)
-		if fi.Flags&0x1 == 1 {
-			// encrypted
-			slog.Warn("encrypted", "name", fname, "flag", fi.Flags)
-		}
-		// fast path
+	fi, err := h.handle_pre(w, r, filemap, method, encoding, 0, statuscode)
+	if err != nil {
+		return err
+	}
+	if fi != nil {
 		rd, err := fi.OpenRaw()
 		if err != nil {
-			return err
+			slog.Error("OpenRaw", "name", fi.Name, "error", err)
 		}
-		ctype := make_contenttype(fi.Comment)
-		if ctype == "" {
-			ctype = make_contentbyext(fname)
-		}
-		if ctype != "" {
-			w.Header().Set("Content-Type", ctype)
-		}
-		for k, v := range h.headers {
-			w.Header().Set(k, v)
-		}
-		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
-		if conditional(r, etag, fi) {
-			*statuscode = http.StatusNotModified
-			w.Header().Add("Etag", etag)
-			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
-			w.WriteHeader(*statuscode)
-			return nil
-		}
-		slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64)
-		w.Header().Add("Content-Encoding", encoding)
-		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
-		w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64, 10))
-		if etag != "" {
-			w.Header().Add("Etag", etag)
-		}
-		*statuscode = http.StatusOK
-		w.WriteHeader(*statuscode)
 		if written, err := io.Copy(w, rd); err != nil {
 			slog.Error("copy", "written", written, "error", err)
 		} else {
