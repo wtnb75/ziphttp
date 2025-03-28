@@ -355,6 +355,7 @@ func zipcmd_helper_check(t *testing.T, zipfile string, expected []string) {
 		return
 	}
 	defer zr.Close()
+	MakeBrotliReader(zr)
 	if len(zr.File) != len(expected) {
 		t.Error("file count mismatch", "in-zip", len(zr.File), "expected", len(expected))
 	}
@@ -405,6 +406,7 @@ func TestZipCmdDel(t *testing.T) {
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "brotli", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
 	}
 	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt"}
 	for idx, cmd := range commands {
@@ -436,6 +438,7 @@ func TestZipCmdNoDel(t *testing.T) {
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "brotli", UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
 	}
 	expected := []string{
 		"name0.txt", "name1.txt", "name2.txt", "indir/name0.txt",
@@ -470,6 +473,7 @@ func TestZipCmdDelSitemap(t *testing.T) {
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
 		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
+		{StripRoot: true, Method: "brotli", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none", SiteMap: "http://localhost/"},
 	}
 	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt", "sitemap.xml"}
 	for idx, cmd := range commands {
@@ -502,6 +506,7 @@ func TestZipCmdSelfDel(t *testing.T) {
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: true, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
+		{StripRoot: true, Method: "brotli", UseAsIs: false, InMemory: false, Parallel: 5, Delete: true, SortBy: "none"},
 	}
 	expected := []string{"name0.txt", "name2.txt", "indir/name0.txt", "indir/name2.txt"}
 	for idx, cmd := range commands {
@@ -535,6 +540,7 @@ func TestZipCmdSelfNoDel(t *testing.T) {
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: true, Parallel: 5, Delete: false, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: true, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
 		{StripRoot: true, Method: "deflate", UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
+		{StripRoot: true, Method: "brotli", UseAsIs: false, InMemory: false, Parallel: 5, Delete: false, SortBy: "none"},
 	}
 	expected := []string{
 		"name0.txt", "name1.txt", "name2.txt", "indir/name0.txt",
