@@ -23,6 +23,7 @@ type ZipCmd struct {
 	Stored    []string `short:"n" long:"store" description:"non compress patterns"`
 	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
 	Method    string   `long:"method" choice:"deflate" choice:"zopfli" choice:"brotli" choice:"store" default:"zopfli" description:"compression method"`
+	Level     int      `long:"compress-level" default:"-1"`
 	UseAsIs   bool     `long:"asis" description:"copy as-is from zipfile"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
 	SiteMap   string   `long:"sitemap" description:"generate sitemap.xml"`
@@ -96,9 +97,11 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 	zipfile.SetOffset(written)
 	switch cmd.Method {
 	case "zopfli":
-		MakeZopfliWriter(zipfile)
+		MakeZopfliWriter(zipfile, cmd.Level)
 	case "brotli":
-		MakeBrotliWriter(zipfile)
+		MakeBrotliWriter(zipfile, cmd.Level)
+	case "deflate":
+		MakeDeflateWriter(zipfile, cmd.Level)
 	}
 	return ofp, zipfile, nil
 }
@@ -376,9 +379,11 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 		}
 		switch cmd.Method {
 		case "zopfli":
-			MakeZopfliWriter(wr)
+			MakeZopfliWriter(wr, cmd.Level)
 		case "brotli":
-			MakeBrotliWriter(wr)
+			MakeBrotliWriter(wr, cmd.Level)
+		case "deflate":
+			MakeDeflateWriter(wr, cmd.Level)
 		}
 		if i != 0 {
 			wgp.Add(1)

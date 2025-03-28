@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"encoding/binary"
 	"encoding/xml"
@@ -422,9 +423,13 @@ type MyZipReader interface {
 	RegisterDecompressor(uint16, zip.Decompressor)
 }
 
-func MakeZopfliWriter(zipfile MyZipWriter) {
+func MakeZopfliWriter(zipfile MyZipWriter, level int) {
+	slog.Debug("set compression level(iterations) for zopfli(default=15)", "level", level)
 	zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
 		opts := zopfli.DefaultOptions()
+		if level != -1 {
+			opts.NumIterations = level
+		}
 		dc := DeflateWriteCloser{opts: opts, output: out}
 		return &dc, nil
 	})
@@ -435,8 +440,12 @@ const (
 	Zstd   uint16 = 93
 )
 
-func MakeBrotliWriter(zipfile MyZipWriter) {
+func MakeBrotliWriter(zipfile MyZipWriter, level int) {
+	slog.Debug("set compression level for brotli(0 to 11)", "level", level)
 	zipfile.RegisterCompressor(Brotli, func(out io.Writer) (io.WriteCloser, error) {
+		if level != -1 {
+			return brotli.NewWriterLevel(out, level), nil
+		}
 		return brotli.NewWriter(out), nil
 	})
 }
@@ -445,4 +454,13 @@ func MakeBrotliReader(zipfile MyZipReader) {
 	zipfile.RegisterDecompressor(Brotli, func(input io.Reader) io.ReadCloser {
 		return io.NopCloser(brotli.NewReader(input))
 	})
+}
+
+func MakeDeflateWriter(zipfile MyZipWriter, level int) {
+	slog.Debug("set compression level for deflate(-2 to 9)", "level", level)
+	if level != -1 {
+		zipfile.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
+			return flate.NewWriter(out, level)
+		})
+	}
 }
