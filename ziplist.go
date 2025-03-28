@@ -23,10 +23,12 @@ func (cmd *ZipList) Execute(args []string) (err error) {
 		switch {
 		case i.FileInfo().IsDir():
 			fmt.Println("/", i.Name)
-		case i.Method != zip.Deflate:
-			fmt.Println("!", i.Name, i.CompressedSize64, i.UncompressedSize64)
-		default:
+		case i.Method == zip.Deflate:
 			fmt.Println("D", i.Name, i.CompressedSize64, i.UncompressedSize64)
+		case i.Method == Brotli:
+			fmt.Println("B", i.Name, i.CompressedSize64, i.UncompressedSize64)
+		default:
+			fmt.Println("!", i.Name, i.CompressedSize64, i.UncompressedSize64)
 		}
 	}
 	return nil

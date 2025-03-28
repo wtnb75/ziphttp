@@ -13,14 +13,13 @@ import (
 func TestStored(t *testing.T) {
 	t.Parallel()
 	hdl := ZipHandler{
-		zipfile:     nil,
+		zipfiles:    nil,
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "index.html",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[string]map[uint16]int),
 	}
-	if err := hdl.initialize_memory(testzip); err != nil {
+	if err := hdl.initialize_memory([][]byte{testzip}); err != nil {
 		t.Error("initialize", err)
 		return
 	}
@@ -45,14 +44,13 @@ func TestStored(t *testing.T) {
 func TestDeflate(t *testing.T) {
 	t.Parallel()
 	hdl := ZipHandler{
-		zipfile:     nil,
+		zipfiles:    nil,
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "index.html",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[string]map[uint16]int),
 	}
-	if err := hdl.initialize_memory(testzip); err != nil {
+	if err := hdl.initialize_memory([][]byte{testzip}); err != nil {
 		t.Error("initialize", err)
 		return
 	}
@@ -94,14 +92,13 @@ func TestDeflate(t *testing.T) {
 func TestIndex(t *testing.T) {
 	t.Parallel()
 	hdl := ZipHandler{
-		zipfile:     nil,
+		zipfiles:    nil,
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "512b.txt",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[string]map[uint16]int),
 	}
-	if err := hdl.initialize_memory(testzip); err != nil {
+	if err := hdl.initialize_memory([][]byte{testzip}); err != nil {
 		t.Error("initialize", err)
 		return
 	}
@@ -120,14 +117,13 @@ func TestIndex(t *testing.T) {
 func TestNotFound(t *testing.T) {
 	t.Parallel()
 	hdl := ZipHandler{
-		zipfile:     nil,
+		zipfiles:    nil,
 		stripprefix: "",
 		addprefix:   "",
 		indexname:   "index.html",
-		deflmap:     make(map[string]int),
-		storemap:    make(map[string]int),
+		methodmap:   make(map[string]map[uint16]int),
 	}
-	if err := hdl.initialize_memory(testzip); err != nil {
+	if err := hdl.initialize_memory([][]byte{testzip}); err != nil {
 		t.Error("initialize", err)
 		return
 	}
