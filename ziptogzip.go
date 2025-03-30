@@ -52,15 +52,26 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 		tarformat = tar.FormatUSTAR
 	}
 	for _, i := range zipfile.File {
-		if !ismatch(i.Name, args) || (!cmd.All && i.Method != zip.Deflate) {
+		if len(args) != 0 && !ismatch(i.Name, args) {
 			slog.Debug("skip", "name", i.Name, "method", i.Method)
 			continue
 		}
 		fname := i.Name
 		size := i.UncompressedSize64
-		if i.Method == zip.Deflate {
+		switch i.Method {
+		case zip.Deflate:
 			fname = i.Name + ".gz"
 			size = i.CompressedSize64 + GzipHeaderSize + GzipFooterSize
+		case Brotli:
+			fname = i.Name + ".br"
+			size = i.CompressedSize64
+		case Zstd:
+			fname = i.Name + ".zstd"
+			size = i.CompressedSize64
+		default:
+			if !cmd.All {
+				continue
+			}
 		}
 		if tarfile != nil {
 			slog.Debug("tar write", "name", fname)
@@ -75,14 +86,26 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 				slog.Error("tar header", "name", fname, "error", err)
 				return err
 			}
-			if i.Method == zip.Deflate {
+			switch i.Method {
+			case zip.Deflate:
 				written, err := CopyGzip(tarfile, i)
 				if err != nil {
 					slog.Error("copy gzip", "error", err, "written", written)
 					return err
 				}
 				slog.Debug("written(gzip)", "name", fname, "written", written)
-			} else {
+			case Brotli, Zstd:
+				arcfile, err := i.OpenRaw()
+				if err != nil {
+					slog.Error("open zip", "name", fname, "error", err)
+					return err
+				}
+				written, err := io.Copy(tarfile, arcfile)
+				if err != nil {
+					slog.Error("copy", "name", fname, "error", err, "written", written)
+				}
+				slog.Debug("written", "name", fname, "written", written)
+			default:
 				arcfile, err := i.Open()
 				if err != nil {
 					slog.Error("open zip", "name", fname, "error", err)
@@ -104,10 +127,37 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 				slog.Error("open file", "error", err)
 				return err
 			}
-			_, err = CopyGzip(outfp, i)
-			if err != nil {
-				slog.Error("copy gzip", "error", err)
-				return err
+			switch i.Method {
+			case zip.Deflate:
+				_, err = CopyGzip(outfp, i)
+				if err != nil {
+					slog.Error("copy gzip", "error", err)
+					return err
+				}
+			case Brotli, Zstd:
+				rd, err := i.OpenRaw()
+				if err != nil {
+					slog.Error("OpenRaw", "error", err)
+					return err
+				}
+				_, err = io.Copy(outfp, rd)
+				if err != nil {
+					slog.Error("copy raw", "error", err)
+					return err
+				}
+			default:
+				rd, err := i.Open()
+				if err != nil {
+					slog.Error("OpenRaw", "error", err)
+					return err
+				}
+				_, err = io.Copy(outfp, rd)
+				if err != nil {
+					slog.Error("copy raw", "error", err)
+					rd.Close()
+					return err
+				}
+				rd.Close()
 			}
 			err = outfp.Close()
 			if err != nil {
