@@ -19,17 +19,27 @@ func (cmd *ZipList) Execute(args []string) (err error) {
 		return err
 	}
 	defer zipfile.Close()
+	typemap := map[uint16]string{
+		zip.Store:   "S",
+		zip.Deflate: "D",
+		Brotli:      "B",
+		Bzip2:       "b",
+		Lzma:        "L",
+		Xz:          "X",
+		Zstd:        "Z",
+		Mp3:         "M",
+		Jpeg:        "J",
+		Webpack:     "W",
+	}
 	for _, i := range zipfile.File {
-		switch {
-		case i.FileInfo().IsDir():
-			fmt.Println("/", i.Name)
-		case i.Method == zip.Deflate:
-			fmt.Println("D", i.Name, i.CompressedSize64, i.UncompressedSize64)
-		case i.Method == Brotli:
-			fmt.Println("B", i.Name, i.CompressedSize64, i.UncompressedSize64)
-		default:
-			fmt.Println("!", i.Name, i.CompressedSize64, i.UncompressedSize64)
+		pfx := "?"
+		if i.FileInfo().IsDir() {
+			pfx = "/"
 		}
+		if v, ok := typemap[i.Method]; ok {
+			pfx = v
+		}
+		fmt.Println(pfx, i.Name, i.CompressedSize64, i.UncompressedSize64, i.Comment)
 	}
 	return nil
 }
