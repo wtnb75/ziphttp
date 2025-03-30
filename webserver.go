@@ -257,33 +257,29 @@ func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, filemap 
 	return fmt.Errorf("not found")
 }
 
-func (h *ZipHandler) handle_normal(w http.ResponseWriter, urlpath string, filestr *zip.File, etag string) {
-	f, err := filestr.Open()
+func (h *ZipHandler) handle_normal(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, fname string, statuscode *int) error {
+	var mtd uint16
+	for mtd = range filemap {
+		break
+	}
+	fi, err := h.handle_pre(w, r, filemap, mtd, "", 0, statuscode)
 	if err != nil {
-		slog.Info("open failed", "path", urlpath, "error", err)
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, "not found")
-		return
+		return err
 	}
-	defer f.Close()
-	if filestr.FileInfo().IsDir() {
-		slog.Info("redirect directory", "path", urlpath)
-		w.Header().Add("Location", urlpath+"/")
-		w.WriteHeader(http.StatusMovedPermanently)
-		return
+	if fi != nil {
+		rd, err := fi.Open()
+		if err != nil {
+			slog.Error("Open", "name", fi.Name, "error", err)
+		}
+		defer rd.Close()
+		if written, err := io.Copy(w, rd); err != nil {
+			slog.Error("copy", "written", written, "error", err)
+		} else {
+			slog.Debug("written", "written", written)
+		}
+		return nil
 	}
-	slog.Debug("normal response", "length", filestr.UncompressedSize64)
-	w.Header().Add("Last-Modified", filestr.Modified.Format(http.TimeFormat))
-	w.Header().Add("Content-Length", strconv.FormatUint(filestr.UncompressedSize64, 10))
-	if etag != "" {
-		w.Header().Add("Etag", etag)
-	}
-	w.WriteHeader(http.StatusOK)
-	if written, err := io.Copy(w, f); err != nil {
-		slog.Error("copy error", "error", err, "written", written)
-	} else {
-		slog.Debug("copy success", "written", written)
-	}
+	return fmt.Errorf("not found")
 }
 
 func conditional(r *http.Request, etag string, fi *zip.File) bool {
@@ -390,10 +386,11 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	filebyenc, ok := h.methodmap[fname]
-	if !ok {
+	if !ok || len(filebyenc) == 0 {
 		statuscode = http.StatusNotFound
 		w.WriteHeader(statuscode)
 		fmt.Fprint(w, "not found")
+		return
 	}
 	encodings := h.accept_encoding(r)
 	slog.Debug("name", "uri", r.URL.Path, "name", fname)
@@ -436,7 +433,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		break
 	}
 	if idx == -1 {
-		slog.Error("no encoding", "name", fname, "num", len(filebyenc))
+		slog.Error("no encoding", "name", fname, "num", len(filebyenc), "map", filebyenc)
 		statuscode = http.StatusInternalServerError
 		w.WriteHeader(statuscode)
 		fmt.Fprint(w, "internal server error")
@@ -469,7 +466,9 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statuscode)
 		return
 	}
-	h.handle_normal(w, r.URL.Path, fi, etag)
+	if err := h.handle_normal(w, r, filebyenc, fname, &statuscode); err != nil {
+		slog.Error("handle normal", "fname", fname, "statuscode", statuscode, "error", err)
+	}
 }
 
 func (h *ZipHandler) init2(inputs []ZipFile) {
