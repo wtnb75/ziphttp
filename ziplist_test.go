@@ -13,7 +13,7 @@ func TestZipList(t *testing.T) {
 	if !strings.Contains(stdout, "D 128mb.txt") {
 		t.Error("not found 128mb", stdout)
 	}
-	if !strings.Contains(stdout, "! 512b.txt") {
+	if !strings.Contains(stdout, "S 512b.txt") {
 		t.Error("not found 512b", stdout)
 	}
 }

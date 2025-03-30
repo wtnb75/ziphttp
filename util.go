@@ -436,8 +436,14 @@ func MakeZopfliWriter(zipfile MyZipWriter, level int) {
 }
 
 const (
-	Brotli uint16 = 0xff99
-	Zstd   uint16 = 93
+	Brotli  uint16 = 0xff99
+	Bzip2   uint16 = 12
+	Lzma    uint16 = 14
+	Zstd    uint16 = 93
+	Mp3     uint16 = 94
+	Xz      uint16 = 95
+	Jpeg    uint16 = 96
+	Webpack uint16 = 97
 )
 
 func MakeBrotliWriter(zipfile MyZipWriter, level int) {

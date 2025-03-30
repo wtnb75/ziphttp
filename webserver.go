@@ -226,7 +226,7 @@ func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap 
 }
 
 func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap map[uint16]int, statuscode *int) error {
-	fi, err := h.handle_pre(w, r, filemap, zip.Deflate, "gzip", 18, statuscode)
+	fi, err := h.handle_pre(w, r, filemap, zip.Deflate, "gzip", GzipHeaderSize+GzipFooterSize, statuscode)
 	if err != nil {
 		return err
 	}

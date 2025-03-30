@@ -15,6 +15,52 @@ type ZiptoGzip struct {
 	TarFormat string `long:"tar-format" description:"format of tar file" choice:"GNU" choice:"PAX" choice:"USTAR" default:"GNU"`
 }
 
+func (cmd *ZiptoGzip) namesize(fi *zip.File) (string, uint64) {
+	switch fi.Method {
+	case zip.Deflate:
+		return fi.Name + ".gz", fi.CompressedSize64 + GzipHeaderSize + GzipFooterSize
+	case Brotli:
+		return fi.Name + ".br", fi.CompressedSize64
+	case Zstd:
+		return fi.Name + ".zstd", fi.CompressedSize64
+	case Lzma:
+		return fi.Name + ".lzma", fi.CompressedSize64
+	case Bzip2:
+		return fi.Name + ".bz2", fi.CompressedSize64
+	case Xz:
+		return fi.Name + ".xz", fi.CompressedSize64
+	case Jpeg:
+		return fi.Name + ".jpeg", fi.CompressedSize64
+	case Mp3:
+		return fi.Name + ".mp3", fi.CompressedSize64
+	case Webpack:
+		return fi.Name + ".wv", fi.CompressedSize64
+	}
+	return fi.Name, fi.UncompressedSize64
+}
+
+func (cmd *ZiptoGzip) output(fi *zip.File, ofp io.Writer) (int64, error) {
+	switch fi.Method {
+	case zip.Deflate:
+		return CopyGzip(ofp, fi)
+	case Brotli, Zstd, Mp3, Xz, Lzma, Jpeg, Webpack:
+		arcfile, err := fi.OpenRaw()
+		if err != nil {
+			slog.Error("open zip", "name", fi.Name, "error", err)
+			return 0, err
+		}
+		return io.Copy(ofp, arcfile)
+	default:
+		arcfile, err := fi.Open()
+		if err != nil {
+			slog.Error("open zip", "name", fi.Name, "error", err)
+			return 0, err
+		}
+		defer arcfile.Close()
+		return io.Copy(ofp, arcfile)
+	}
+}
+
 func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 	init_log()
 	filename := archiveFilename()
@@ -56,22 +102,9 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 			slog.Debug("skip", "name", i.Name, "method", i.Method)
 			continue
 		}
-		fname := i.Name
-		size := i.UncompressedSize64
-		switch i.Method {
-		case zip.Deflate:
-			fname = i.Name + ".gz"
-			size = i.CompressedSize64 + GzipHeaderSize + GzipFooterSize
-		case Brotli:
-			fname = i.Name + ".br"
-			size = i.CompressedSize64
-		case Zstd:
-			fname = i.Name + ".zstd"
-			size = i.CompressedSize64
-		default:
-			if !cmd.All {
-				continue
-			}
+		fname, size := cmd.namesize(i)
+		if fname == i.Name && !cmd.All {
+			continue
 		}
 		if tarfile != nil {
 			slog.Debug("tar write", "name", fname)
@@ -86,37 +119,12 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 				slog.Error("tar header", "name", fname, "error", err)
 				return err
 			}
-			switch i.Method {
-			case zip.Deflate:
-				written, err := CopyGzip(tarfile, i)
-				if err != nil {
-					slog.Error("copy gzip", "error", err, "written", written)
-					return err
-				}
-				slog.Debug("written(gzip)", "name", fname, "written", written)
-			case Brotli, Zstd:
-				arcfile, err := i.OpenRaw()
-				if err != nil {
-					slog.Error("open zip", "name", fname, "error", err)
-					return err
-				}
-				written, err := io.Copy(tarfile, arcfile)
-				if err != nil {
-					slog.Error("copy", "name", fname, "error", err, "written", written)
-				}
-				slog.Debug("written", "name", fname, "written", written)
-			default:
-				arcfile, err := i.Open()
-				if err != nil {
-					slog.Error("open zip", "name", fname, "error", err)
-					return err
-				}
-				written, err := io.Copy(tarfile, arcfile)
-				if err != nil {
-					slog.Error("copy", "name", fname, "error", err, "written", written)
-				}
-				slog.Debug("written", "name", fname, "written", written)
+			written, err := cmd.output(i, tarfile)
+			if err != nil {
+				slog.Error("copy", "error", err, "written", written)
+				return err
 			}
+			slog.Debug("written", "name", fname, "written", written)
 		} else {
 			if err = os.MkdirAll(filepath.Dir(fname), 0o777); err != nil {
 				slog.Error("mkdir", "error", err)
@@ -127,38 +135,12 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 				slog.Error("open file", "error", err)
 				return err
 			}
-			switch i.Method {
-			case zip.Deflate:
-				_, err = CopyGzip(outfp, i)
-				if err != nil {
-					slog.Error("copy gzip", "error", err)
-					return err
-				}
-			case Brotli, Zstd:
-				rd, err := i.OpenRaw()
-				if err != nil {
-					slog.Error("OpenRaw", "error", err)
-					return err
-				}
-				_, err = io.Copy(outfp, rd)
-				if err != nil {
-					slog.Error("copy raw", "error", err)
-					return err
-				}
-			default:
-				rd, err := i.Open()
-				if err != nil {
-					slog.Error("OpenRaw", "error", err)
-					return err
-				}
-				_, err = io.Copy(outfp, rd)
-				if err != nil {
-					slog.Error("copy raw", "error", err)
-					rd.Close()
-					return err
-				}
-				rd.Close()
+			written, err := cmd.output(i, outfp)
+			if err != nil {
+				slog.Error("copy", "error", err, "written", written)
+				return err
 			}
+			slog.Debug("written", "name", fname, "written", written)
 			err = outfp.Close()
 			if err != nil {
 				slog.Error("close", "error", err)
