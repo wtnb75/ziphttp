@@ -137,6 +137,8 @@ func (h *ZipHandler) accept_encoding(r *http.Request) Encoding {
 			res |= EncodingZstd
 		case "*":
 			res |= EncodingAny
+		case "":
+			continue
 		default:
 			slog.Info("unknown encoding", "encoding", enc, "header", encodings)
 		}
@@ -208,9 +210,11 @@ func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap 
 		if encoding != "" {
 			slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64, "encoding", encoding)
 			w.Header().Add("Content-Encoding", encoding)
+			w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64+addsz, 10))
+		} else {
+			w.Header().Add("Content-Length", strconv.FormatUint(fi.UncompressedSize64, 10))
 		}
 		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
-		w.Header().Add("Content-Length", strconv.FormatUint(fi.CompressedSize64+addsz, 10))
 		if etag != "" {
 			w.Header().Add("Etag", etag)
 		}
