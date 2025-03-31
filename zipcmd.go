@@ -35,6 +35,7 @@ type ZipCmd struct {
 	Reverse   bool     `short:"r" long:"reverse" description:"reversed order"`
 	InMemory  bool     `long:"in-memory" description:"do not use /tmp"`
 	Progress  bool     `long:"progress" description:"show progress bar"`
+	SkipStore bool     `long:"skip-store" description:"skip file if stored method"`
 
 	method      uint16
 	nametable   map[string][]*ChooseFile
@@ -148,6 +149,11 @@ func (cmd *ZipCmd) copy_compress_job(jobs chan<- CompressWork, name string, inpu
 	if ismatch(name, cmd.Stored) {
 		fh.Method = zip.Store
 	}
+	if fh.Method == zip.Store && cmd.SkipStore {
+		slog.Debug("skip store", "name", name, "size", input.UncompressedSize)
+		return nil
+	}
+	slog.Debug("store", "name", name, "size", input.UncompressedSize, "min", cmd.MinSize)
 	ifp, err := input.Open()
 	if err != nil {
 		slog.Error("source Open", "name", name, "error", err)

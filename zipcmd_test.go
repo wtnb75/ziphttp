@@ -420,6 +420,30 @@ func TestZipCmdDel(t *testing.T) {
 	}
 }
 
+func TestZipCmdSkipStore(t *testing.T) {
+	orig_global := globalOption
+	defer func() {
+		globalOption = orig_global
+	}()
+	dirname, zipname, err := zipcmd_helper_inittest(t)
+	if err != nil {
+		return
+	}
+	commands := []ZipCmd{
+		{StripRoot: true, Method: "deflate", SkipStore: true, MinSize: 512},
+	}
+	expected := []string{}
+	for idx, cmd := range commands {
+		outfile := filepath.Join(t.TempDir(), fmt.Sprintf("output-%d.zip", idx))
+		globalOption.Archive = flags.Filename(outfile)
+		res := cmd.Execute([]string{dirname, zipname})
+		if res != nil {
+			t.Error("error", res, "idx", idx)
+		}
+		zipcmd_helper_check(t, outfile, expected)
+	}
+}
+
 func TestZipCmdNoDel(t *testing.T) {
 	orig_global := globalOption
 	defer func() {
