@@ -14,6 +14,7 @@ ziphttp is a lightweight and easy-to-use HTTP server that allows you to serve st
 - **Small footprint**: size of container image is only <10MB. serving files are also compressed as you can see.
 - **Make single executable**: ziphttp can create self-extract zip with ziphttp itself. generated binary runs webserver using its own contents.
 - **Client-side Cache friendly**: ziphttp serves static files, send response with `ETag` header based on checksum value in zip file. ziphttp supports conditional GET with `If-None-Match` header.
+- **Zopfli/Brotli support**: ziphttp supports normal deflate, zopfli and brotli compression.
 
 ## Installation
 
@@ -65,6 +66,10 @@ from docker
 - or self-extract .zip and run -> http://localhost:3000/
     - `ziphttp zip -f hugo.run -s public/ --self`
     - `./hugo.run webserver --self`
+- make brotli encoded file. it is not compatible with normal zip files.
+    - `ziphttp zip -f hugo-br.zip --method=brotli --skip-store hugo.zip`
+- serve static site supports brotli
+    - `ziphttp webserver -f hugo.zip --add hugo-br.zip`
 
 as docker:
 
