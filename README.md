@@ -52,6 +52,10 @@ from docker
 - load zip in-memory. no storage access required after initialize was finished
     - `ziphttp webserver -f your-zip.zip -l :8888 --in-memory`
     - `./newserver webserver --self --in-memory -l :8888`
+- reload zip
+    - `kill -HUP <pid>`
+- autoreload (detect zip file changed -> reload)
+    - `ziphttp webserver -f your-zip.zip --autoreload`
 
 # CookBook
 
@@ -117,3 +121,41 @@ services:
       traefik.http.routers.static.rule: "PathPrefix(`/static`)"
       traefik.http.routers.static.entrypoints: web
 ```
+
+## flutter app
+
+- build for web
+    - `flutter build web`
+- make zip
+    - `ziphttp zip -f app.zip -s build/web`
+- run -> http://localhost:3000
+    - `ziphttp webserver -f app.zip`
+
+## gh-actions artifact
+
+- download artifact
+    - from browser
+- run -> http://localhost:3000
+    - `ziphttp webserver -f your-file.zip`
+
+## copy from original site
+
+- mirror
+    - `wget -m -p -E -k --compression=auto -np http://your.url.example.com/sub/path/`
+- make zip
+    - `ziphttp zip -f mirror.zip -s your.url.example.com/sub/path/`
+- run -> http://localhost:3000
+    - `ziphttp webserver -f mirror.zip`
+
+## others
+
+- jekyll, mkdocs, Next.js SSG, etc...
+
+## support both: brotli and gzip(zopfli)
+
+- make gzip with zopfli compression
+    - `ziphttp zip -f site.zip -s your/base/dir`
+- make brotli archive from site.zip
+    - `ziphttp zip -f site-br.zip site.zip --method=brotli --skip-store`
+- boot -> http://localhost:3000
+    - `ziphttp webserver -f site.zip --add site-br.zip`
