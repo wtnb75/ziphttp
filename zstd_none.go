@@ -9,7 +9,3 @@ import (
 func MakeZstdWriter(zipfile MyZipWriter, level int) {
 	slog.Warn("zstd not supported")
 }
-
-func MakeZstdReader(zipfile MyZipReader) {
-	slog.Info("zstd not supported")
-}

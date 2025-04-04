@@ -44,6 +44,19 @@ type ZipCmd struct {
 	args        []string
 }
 
+func (cmd *ZipCmd) makewriter(zipfile *zip.Writer) {
+	switch cmd.Method {
+	case "zopfli":
+		MakeZopfliWriter(zipfile, cmd.Level)
+	case "brotli":
+		MakeBrotliWriter(zipfile, cmd.Level)
+	case "zstd":
+		MakeZstdWriter(zipfile, cmd.Level)
+	case "deflate":
+		MakeDeflateWriter(zipfile, cmd.Level)
+	}
+}
+
 func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 	var mode os.FileMode
 	if globalOption.Self {
@@ -96,16 +109,7 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 	zipfile := zip.NewWriter(ofp)
 	slog.Debug("setoffiset", "written", written)
 	zipfile.SetOffset(written)
-	switch cmd.Method {
-	case "zopfli":
-		MakeZopfliWriter(zipfile, cmd.Level)
-	case "brotli":
-		MakeBrotliWriter(zipfile, cmd.Level)
-	case "zstd":
-		MakeZstdWriter(zipfile, cmd.Level)
-	case "deflate":
-		MakeDeflateWriter(zipfile, cmd.Level)
-	}
+	cmd.makewriter(zipfile)
 	return ofp, zipfile, nil
 }
 
@@ -389,16 +393,7 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 			slog.Error("worker writer", "number", i)
 			return
 		}
-		switch cmd.Method {
-		case "zopfli":
-			MakeZopfliWriter(wr, cmd.Level)
-		case "brotli":
-			MakeBrotliWriter(wr, cmd.Level)
-		case "zstd":
-			MakeZstdWriter(wr, cmd.Level)
-		case "deflate":
-			MakeDeflateWriter(wr, cmd.Level)
-		}
+		cmd.makewriter(wr)
 		if i != 0 {
 			wgp.Add(1)
 			go CompressWorker(fmt.Sprint(i), wr, jobs, wgp)

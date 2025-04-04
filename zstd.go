@@ -3,6 +3,7 @@
 package main
 
 import (
+	"archive/zip"
 	"io"
 	"log/slog"
 
@@ -19,8 +20,8 @@ func MakeZstdWriter(zipfile MyZipWriter, level int) {
 	})
 }
 
-func MakeZstdReader(zipfile MyZipReader) {
-	zipfile.RegisterDecompressor(Zstd, func(input io.Reader) io.ReadCloser {
+func init() {
+	zip.RegisterDecompressor(Zstd, func(input io.Reader) io.ReadCloser {
 		return zstd.NewReader(input)
 	})
 }
