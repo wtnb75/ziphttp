@@ -22,7 +22,7 @@ type ZipCmd struct {
 	Exclude   []string `short:"x" long:"exclude" description:"exclude files"`
 	Stored    []string `short:"n" long:"store" description:"non compress patterns"`
 	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
-	Method    string   `long:"method" choice:"deflate" choice:"zopfli" choice:"brotli" choice:"store" default:"zopfli" description:"compression method"`
+	Method    string   `long:"method" choice:"deflate" choice:"zopfli" choice:"brotli" choice:"store" choice:"zstd" default:"zopfli" description:"compression method"`
 	Level     int      `long:"compress-level" default:"-1"`
 	UseAsIs   bool     `long:"asis" description:"copy as-is from zipfile"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
@@ -101,6 +101,8 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 		MakeZopfliWriter(zipfile, cmd.Level)
 	case "brotli":
 		MakeBrotliWriter(zipfile, cmd.Level)
+	case "zstd":
+		MakeZstdWriter(zipfile, cmd.Level)
 	case "deflate":
 		MakeDeflateWriter(zipfile, cmd.Level)
 	}
@@ -232,6 +234,8 @@ func (cmd *ZipCmd) validate(args []string) (err error) {
 	case "brotli":
 		cmd.method = Brotli
 		slog.Warn("incompatible compressor", "method", cmd.Method)
+	case "zstd":
+		cmd.method = Zstd
 	case "store":
 		cmd.method = zip.Store
 	default:
@@ -354,6 +358,8 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 		slog.Info("using zopfli compressor", "workers", cmd.Parallel)
 	case "brotli":
 		slog.Info("using brotli compressor", "workers", cmd.Parallel)
+	case "zstd":
+		slog.Info("using zstd compressor", "workers", cmd.Parallel)
 	case "store":
 		slog.Info("using no compressor", "workers", cmd.Parallel)
 	case "deflate":
@@ -388,6 +394,8 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 			MakeZopfliWriter(wr, cmd.Level)
 		case "brotli":
 			MakeBrotliWriter(wr, cmd.Level)
+		case "zstd":
+			MakeZstdWriter(wr, cmd.Level)
 		case "deflate":
 			MakeDeflateWriter(wr, cmd.Level)
 		}

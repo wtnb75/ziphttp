@@ -353,7 +353,7 @@ func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *syn
 		slog.Debug("work", "name", name, "job", job.Header.Name, "method", job.Header.Method)
 		fp, err := wr.CreateHeader(job.Header)
 		if err != nil {
-			slog.Error("CreateHeader", "name", job.Header.Name, "error", err)
+			slog.Error("CreateHeader", "name", job.Header.Name, "method", job.Header.Method, "error", err)
 			return
 		}
 		written, err := filtercopy(fp, job.Reader, job.MyURL)

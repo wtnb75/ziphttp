@@ -59,6 +59,7 @@ func NewZipFileBytes(input []byte) (*ZipFileBytes, error) {
 		return nil, err
 	}
 	MakeBrotliReader(z)
+	MakeZstdReader(z)
 	res := ZipFileBytes{z: z}
 	return &res, nil
 }
@@ -89,6 +90,7 @@ func NewZipFileFile(name string) (*ZipFileFile, error) {
 		return nil, err
 	}
 	MakeBrotliReader(z)
+	MakeZstdReader(z)
 	res := ZipFileFile{z: z}
 	return &res, nil
 }
