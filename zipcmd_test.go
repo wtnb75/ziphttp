@@ -355,7 +355,6 @@ func zipcmd_helper_check(t *testing.T, zipfile string, expected []string) {
 		return
 	}
 	defer zr.Close()
-	MakeBrotliReader(zr)
 	if len(zr.File) != len(expected) {
 		t.Error("file count mismatch", "in-zip", len(zr.File), "expected", len(expected))
 	}

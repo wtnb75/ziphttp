@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/andybalholm/brotli"
 	"github.com/foobaz/go-zopfli/zopfli"
 	"golang.org/x/net/html"
 )
@@ -353,7 +352,7 @@ func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *syn
 		slog.Debug("work", "name", name, "job", job.Header.Name, "method", job.Header.Method)
 		fp, err := wr.CreateHeader(job.Header)
 		if err != nil {
-			slog.Error("CreateHeader", "name", job.Header.Name, "error", err)
+			slog.Error("CreateHeader", "name", job.Header.Name, "method", job.Header.Method, "error", err)
 			return
 		}
 		written, err := filtercopy(fp, job.Reader, job.MyURL)
@@ -445,22 +444,6 @@ const (
 	Jpeg    uint16 = 96
 	Webpack uint16 = 97
 )
-
-func MakeBrotliWriter(zipfile MyZipWriter, level int) {
-	slog.Debug("set compression level for brotli(0 to 11)", "level", level)
-	zipfile.RegisterCompressor(Brotli, func(out io.Writer) (io.WriteCloser, error) {
-		if level != -1 {
-			return brotli.NewWriterLevel(out, level), nil
-		}
-		return brotli.NewWriter(out), nil
-	})
-}
-
-func MakeBrotliReader(zipfile MyZipReader) {
-	zipfile.RegisterDecompressor(Brotli, func(input io.Reader) io.ReadCloser {
-		return io.NopCloser(brotli.NewReader(input))
-	})
-}
 
 func MakeDeflateWriter(zipfile MyZipWriter, level int) {
 	slog.Debug("set compression level for deflate(-2 to 9)", "level", level)

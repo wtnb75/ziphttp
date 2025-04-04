@@ -22,7 +22,7 @@ type ZipCmd struct {
 	Exclude   []string `short:"x" long:"exclude" description:"exclude files"`
 	Stored    []string `short:"n" long:"store" description:"non compress patterns"`
 	MinSize   uint     `short:"m" long:"min-size" description:"compress minimum size" default:"512"`
-	Method    string   `long:"method" choice:"deflate" choice:"zopfli" choice:"brotli" choice:"store" default:"zopfli" description:"compression method"`
+	Method    string   `long:"method" choice:"deflate" choice:"zopfli" choice:"brotli" choice:"store" choice:"zstd" default:"zopfli" description:"compression method"`
 	Level     int      `long:"compress-level" default:"-1"`
 	UseAsIs   bool     `long:"asis" description:"copy as-is from zipfile"`
 	BaseURL   string   `long:"baseurl" description:"rewrite html link to relative"`
@@ -42,6 +42,19 @@ type ZipCmd struct {
 	zip_to_read []*zip.ReadCloser
 	zipios      []ZipIO
 	args        []string
+}
+
+func (cmd *ZipCmd) makewriter(zipfile *zip.Writer) {
+	switch cmd.Method {
+	case "zopfli":
+		MakeZopfliWriter(zipfile, cmd.Level)
+	case "brotli":
+		MakeBrotliWriter(zipfile, cmd.Level)
+	case "zstd":
+		MakeZstdWriter(zipfile, cmd.Level)
+	case "deflate":
+		MakeDeflateWriter(zipfile, cmd.Level)
+	}
 }
 
 func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
@@ -96,14 +109,7 @@ func (cmd *ZipCmd) prepare_output() (*os.File, *zip.Writer, error) {
 	zipfile := zip.NewWriter(ofp)
 	slog.Debug("setoffiset", "written", written)
 	zipfile.SetOffset(written)
-	switch cmd.Method {
-	case "zopfli":
-		MakeZopfliWriter(zipfile, cmd.Level)
-	case "brotli":
-		MakeBrotliWriter(zipfile, cmd.Level)
-	case "deflate":
-		MakeDeflateWriter(zipfile, cmd.Level)
-	}
+	cmd.makewriter(zipfile)
 	return ofp, zipfile, nil
 }
 
@@ -232,6 +238,8 @@ func (cmd *ZipCmd) validate(args []string) (err error) {
 	case "brotli":
 		cmd.method = Brotli
 		slog.Warn("incompatible compressor", "method", cmd.Method)
+	case "zstd":
+		cmd.method = Zstd
 	case "store":
 		cmd.method = zip.Store
 	default:
@@ -354,6 +362,8 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 		slog.Info("using zopfli compressor", "workers", cmd.Parallel)
 	case "brotli":
 		slog.Info("using brotli compressor", "workers", cmd.Parallel)
+	case "zstd":
+		slog.Info("using zstd compressor", "workers", cmd.Parallel)
 	case "store":
 		slog.Info("using no compressor", "workers", cmd.Parallel)
 	case "deflate":
@@ -383,14 +393,7 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 			slog.Error("worker writer", "number", i)
 			return
 		}
-		switch cmd.Method {
-		case "zopfli":
-			MakeZopfliWriter(wr, cmd.Level)
-		case "brotli":
-			MakeBrotliWriter(wr, cmd.Level)
-		case "deflate":
-			MakeDeflateWriter(wr, cmd.Level)
-		}
+		cmd.makewriter(wr)
 		if i != 0 {
 			wgp.Add(1)
 			go CompressWorker(fmt.Sprint(i), wr, jobs, wgp)
