@@ -375,27 +375,14 @@ func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *syn
 
 func ZipPassThru(wr *zip.Writer, files []*zip.File) error {
 	for _, f := range files {
-		ofh := f.FileHeader
-		ifp, err := f.OpenRaw()
-		if err != nil {
-			slog.Error("OpenRaw", "name", f.Name, "error", err)
+		if err := wr.Copy(f); err != nil {
+			slog.Error("Copy", "name", f.Name, "error", err)
 			return err
 		}
-		ofp, err := wr.CreateRaw(&ofh)
-		if err != nil {
-			slog.Error("CreateRaw", "name", ofh.Name, "error", err)
-			return err
-		}
-		written, err := io.Copy(ofp, ifp)
-		if err != nil && err != io.EOF {
-			slog.Error("copy", "error", err, "name", f.Name, "written", written)
-			return err
-		}
-		slog.Debug("done copy", "written", written, "name", f.Name, "error", err)
-		if err = wr.Flush(); err != nil {
-			slog.Error("flush", "error", err, "name", f.Name)
-			return err
-		}
+	}
+	if err := wr.Flush(); err != nil {
+		slog.Error("flush", "error", err)
+		return err
 	}
 	return nil
 }
