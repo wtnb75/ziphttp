@@ -532,6 +532,12 @@ func (h *ZipHandler) init2(inputs []ZipFile) {
 	slog.Info("by method", "count", count)
 	h.rwlock.Lock()
 	defer h.rwlock.Unlock()
+	for _, v := range h.zipfiles {
+		if err := v.Close(); err != nil {
+			slog.Error("close zipfile", "error", err)
+			// pass
+		}
+	}
 	h.zipfiles = inputs
 	h.methodmap = methodmap
 }
