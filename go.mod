@@ -1,6 +1,6 @@
 module github.com/wtnb75/ziphttp
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/DataDog/zstd v1.5.7
