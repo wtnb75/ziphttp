@@ -311,15 +311,13 @@ func filtercopy(dst io.Writer, src io.Reader, baseurl string) (int64, error) {
 		rpipe, wpipe := io.Pipe()
 		defer rpipe.Close()
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func(w *sync.WaitGroup) {
-			defer w.Done()
+		wg.Go(func() {
 			defer wpipe.Close()
 			err := LinkRelative(baseurl, src, wpipe)
 			if err != nil {
 				slog.Error("linkrelative", "error", err, "baseurl", baseurl)
 			}
-		}(&wg)
+		})
 		written, err := io.Copy(dst, rpipe)
 		if err != nil {
 			slog.Error("Copy", "baseurl", baseurl)
@@ -337,9 +335,7 @@ type CompressWork struct {
 	MyURL  string
 }
 
-func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func CompressWorker(name string, wr *zip.Writer, ch <-chan CompressWork) {
 	for {
 		job, ok := <-ch
 		if !ok {

@@ -261,9 +261,7 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 		}
 		if st.IsDir() {
 			// walk dir
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				err := filepath.WalkDir(dirname, func(path string, info fs.DirEntry, err1 error) error {
 					if err1 != nil {
 						slog.Error("walk", "path", path, "error", err1)
@@ -298,7 +296,7 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 				if err != nil {
 					slog.Error("walk", "error", err)
 				}
-			}()
+			})
 		} else if filepath.Ext(dirname) == ".zip" {
 			// zip file
 			zipfile, err := zip.OpenReader(dirname)
@@ -306,9 +304,7 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 				slog.Error("zip open", "name", dirname, "error", err)
 			}
 			cmd.zip_to_read = append(cmd.zip_to_read, zipfile)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for _, fi := range zipfile.File {
 					if fi.FileInfo().IsDir() {
 						slog.Debug("isdir", "root", dirname, "path", fi.Name)
@@ -323,7 +319,7 @@ func (cmd *ZipCmd) create_nametable(args []string) (err error) {
 					file_num++
 					lock.Unlock()
 				}
-			}()
+			})
 		} else if st.Mode().IsRegular() {
 			// single file
 			filename := filepath.Base(dirname)
@@ -395,8 +391,9 @@ func (cmd *ZipCmd) boot_workers(wgp *sync.WaitGroup) (jobs chan CompressWork, te
 		}
 		cmd.makewriter(wr)
 		if i != 0 {
-			wgp.Add(1)
-			go CompressWorker(fmt.Sprint(i), wr, jobs, wgp)
+			wgp.Go(func() {
+				CompressWorker(fmt.Sprint(i), wr, jobs)
+			})
 		}
 	}
 	return
