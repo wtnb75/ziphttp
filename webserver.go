@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -115,6 +116,8 @@ const (
 	EncodingAny
 )
 
+var ErrNotModified = errors.New("not modified")
+
 func (h *ZipHandler) accept_encoding(r *http.Request) Encoding {
 	var res Encoding = 0
 	encodings := strings.Split(r.Header.Get("Accept-Encoding"), ",")
@@ -203,7 +206,7 @@ func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap 
 			w.Header().Add("Etag", etag)
 			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 			w.WriteHeader(*statuscode)
-			return nil, nil
+			return nil, ErrNotModified
 		}
 		if encoding != "" {
 			slog.Debug("compressed response", "length", fi.CompressedSize64, "original", fi.UncompressedSize64, "encoding", encoding)
@@ -312,7 +315,8 @@ func make_contentbyext(fname string) string {
 func (h *ZipHandler) send_raw(w http.ResponseWriter, r *http.Request, encodings Encoding, filebyenc map[uint16]int, fname string, statuscode *int) bool {
 	if encodings&EncodingBrotli != 0 {
 		slog.Debug("brotli encoding supported", "encodings", encodings)
-		if h.handle_raw(w, r, filebyenc, Brotli, "br", fname, statuscode) == nil {
+		switch h.handle_raw(w, r, filebyenc, Brotli, "br", fname, statuscode) {
+		case ErrNotModified, nil:
 			return true
 		}
 		slog.Debug("brotli file not found", "name", fname)
@@ -320,21 +324,24 @@ func (h *ZipHandler) send_raw(w http.ResponseWriter, r *http.Request, encodings 
 	}
 	if encodings&EncodingZstd != 0 {
 		slog.Debug("zstd encoding supported", "encodings", encodings)
-		if h.handle_raw(w, r, filebyenc, Zstd, "zstd", fname, statuscode) == nil {
+		switch h.handle_raw(w, r, filebyenc, Zstd, "zstd", fname, statuscode) {
+		case ErrNotModified, nil:
 			return true
 		}
 		// pass through
 	}
 	if encodings&EncodingGzip != 0 {
 		slog.Debug("gzip encoding supported", "encodings", encodings)
-		if h.handle_gzip(w, r, filebyenc, statuscode) == nil {
+		switch h.handle_gzip(w, r, filebyenc, statuscode) {
+		case ErrNotModified, nil:
 			return true
 		}
 		slog.Debug("gzip file not found", "name", fname)
 		// pass through
 	} else if encodings&EncodingDeflate != 0 {
 		slog.Debug("deflate encoding supported", "encodings", encodings)
-		if h.handle_raw(w, r, filebyenc, zip.Deflate, "deflate", fname, statuscode) == nil {
+		switch h.handle_raw(w, r, filebyenc, zip.Deflate, "deflate", fname, statuscode) {
+		case ErrNotModified, nil:
 			return true
 		}
 		slog.Debug("deflate file not found", "name", fname)
