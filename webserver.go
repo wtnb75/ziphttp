@@ -494,6 +494,10 @@ func (h *ZipHandler) init2(inputs []ZipFile) {
 			fi := input.File(i)
 			offset, err := fi.DataOffset()
 			slog.Debug("file", "n", i, "offset", offset, "error", err)
+			if strings.Contains(fi.Name, "..") {
+				slog.Warn("skip suspicious file", "name", fi.Name)
+				continue
+			}
 			if fi.FileInfo().IsDir() {
 				slog.Debug("isdir", "name", fi.Name)
 				continue
