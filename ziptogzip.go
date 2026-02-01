@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ZiptoGzip struct {
@@ -100,6 +101,10 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 	for _, i := range zipfile.File {
 		if len(args) != 0 && !ismatch(i.Name, args) {
 			slog.Debug("skip", "name", i.Name, "method", i.Method)
+			continue
+		}
+		if strings.Contains(i.Name, "..") {
+			slog.Warn("skip suspicious file", "name", i.Name)
 			continue
 		}
 		fname, size := cmd.namesize(i)
