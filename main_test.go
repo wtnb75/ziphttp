@@ -117,4 +117,7 @@ func TestNoCommand(t *testing.T) {
 	if !strings.Contains(stderr, " webserver") {
 		t.Error("webserver")
 	}
+	if !strings.Contains(stderr, " install-skill") {
+		t.Error("install-skill")
+	}
 }
