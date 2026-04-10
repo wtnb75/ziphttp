@@ -56,6 +56,9 @@ func (cmd *InstallSkillCmd) Execute(args []string) error {
 	if !cmd.Force {
 		if _, err := os.Stat(skillPath); err == nil {
 			return fmt.Errorf("target file already exists: %s", skillPath)
+		} else if !os.IsNotExist(err) {
+			slog.Error("stat skill", "path", skillPath, "error", err)
+			return err
 		}
 	}
 
