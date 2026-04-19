@@ -48,7 +48,7 @@ func (cmd *InstallSkillCmd) Execute(args []string) error {
 		return fmt.Errorf("name must not be empty")
 	}
 	if !skillNamePattern.MatchString(name) {
-		return fmt.Errorf("name contains invalid characters: %s", name)
+		return fmt.Errorf("name contains invalid characters: %q", name)
 	}
 	if embeddedSkillMD == "" {
 		return fmt.Errorf("embedded skill content is empty")
