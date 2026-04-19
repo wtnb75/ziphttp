@@ -11,9 +11,17 @@ import (
 	"strings"
 )
 
-func safeOutputPath(name string) (string, error) {
+func safeOutputPath(baseDir, name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("empty output path")
+	}
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", err
+	}
+	baseAbs, err = filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", err
 	}
 	cleaned := filepath.Clean(name)
 	if cleaned == "." || cleaned == ".." {
@@ -22,14 +30,35 @@ func safeOutputPath(name string) (string, error) {
 	if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
 		return "", fmt.Errorf("absolute path is not allowed: %s", name)
 	}
-	rel, err := filepath.Rel(".", cleaned)
+	targetAbs := filepath.Join(baseAbs, cleaned)
+	rel, err := filepath.Rel(baseAbs, targetAbs)
 	if err != nil {
 		return "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path traversal detected: %s", name)
 	}
-	return cleaned, nil
+	cur := baseAbs
+	for _, part := range strings.Split(cleaned, string(os.PathSeparator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return "", fmt.Errorf("path traversal detected: %s", name)
+		}
+		cur = filepath.Join(cur, part)
+		st, err := os.Lstat(cur)
+		if err != nil {
+			if os.IsNotExist(err) {
+				break
+			}
+			return "", err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("symlink path component is not allowed: %s", cur)
+		}
+	}
+	return targetAbs, nil
 }
 
 type ZiptoGzip struct {
@@ -86,6 +115,11 @@ func (cmd *ZiptoGzip) output(fi *zip.File, ofp io.Writer) (int64, error) {
 
 func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 	init_log()
+	baseDir, err := os.Getwd()
+	if err != nil {
+		slog.Error("getwd", "error", err)
+		return err
+	}
 	filename := archiveFilename()
 	zipfile, err := zip.OpenReader(filename)
 	if err != nil {
@@ -153,7 +187,7 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 			}
 			slog.Debug("written", "name", fname, "written", written)
 		} else {
-			safePath, err := safeOutputPath(fname)
+			safePath, err := safeOutputPath(baseDir, fname)
 			if err != nil {
 				slog.Error("invalid output path", "name", fname, "error", err)
 				return err
