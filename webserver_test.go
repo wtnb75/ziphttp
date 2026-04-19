@@ -679,6 +679,21 @@ func TestDoListen(t *testing.T) {
 	}
 }
 
+func TestDoListenDefaultAndInvalid(t *testing.T) {
+	t.Parallel()
+
+	ln, err := do_listen("127.0.0.1:0")
+	if err != nil {
+		t.Error("default tcp listen", err)
+		return
+	}
+	_ = ln.Close()
+
+	if _, err = do_listen("bad://addr"); err == nil {
+		t.Error("expected invalid listen error")
+	}
+}
+
 func TestMultipleArchiveInitializeAndServe(t *testing.T) {
 	t.Parallel()
 	td := t.TempDir()

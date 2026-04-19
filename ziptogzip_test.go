@@ -202,6 +202,86 @@ func TestZiptoGzipOutputRawMethod(t *testing.T) {
 	}
 }
 
+func TestZiptoGzipExecuteSkipSuspiciousAndStore(t *testing.T) {
+	td := t.TempDir()
+	zipname := filepath.Join(td, "input.zip")
+	f, err := os.Create(zipname)
+	if err != nil {
+		t.Error("create zip", err)
+		return
+	}
+	zw := zip.NewWriter(f)
+	if w, err := zw.CreateHeader(&zip.FileHeader{Name: "safe.txt", Method: zip.Store, Modified: time.Unix(1, 0)}); err != nil {
+		t.Error("create safe", err)
+		_ = zw.Close()
+		_ = f.Close()
+		return
+	} else if _, err := w.Write([]byte("safe")); err != nil {
+		t.Error("write safe", err)
+		_ = zw.Close()
+		_ = f.Close()
+		return
+	}
+	if w, err := zw.CreateHeader(&zip.FileHeader{Name: "../evil.txt", Method: zip.Deflate, Modified: time.Unix(1, 0)}); err != nil {
+		t.Error("create evil", err)
+		_ = zw.Close()
+		_ = f.Close()
+		return
+	} else if _, err := w.Write([]byte("evil")); err != nil {
+		t.Error("write evil", err)
+		_ = zw.Close()
+		_ = f.Close()
+		return
+	}
+	if err := zw.Close(); err != nil {
+		t.Error("close writer", err)
+		_ = f.Close()
+		return
+	}
+	if err := f.Close(); err != nil {
+		t.Error("close file", err)
+		return
+	}
+
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Error("getwd", err)
+		return
+	}
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+		_ = os.Chdir(oldwd)
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipname)
+	if err := os.Chdir(td); err != nil {
+		t.Error("chdir", err)
+		return
+	}
+
+	cmd := ZiptoGzip{All: false}
+	if err := cmd.Execute(nil); err != nil {
+		t.Error("execute", err)
+		return
+	}
+
+	entries, err := os.ReadDir(td)
+	if err != nil {
+		t.Error("readdir", err)
+		return
+	}
+	if len(entries) != 1 {
+		t.Error("unexpected output file count", len(entries))
+		return
+	}
+	if entries[0].Name() != "input.zip" {
+		t.Error("unexpected output file", entries[0].Name())
+	}
+}
+
 func createRawMethodZip(path string, method uint16, name string, raw []byte) error {
 	f, err := os.Create(path)
 	if err != nil {
