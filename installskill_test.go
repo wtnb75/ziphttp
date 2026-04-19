@@ -65,3 +65,33 @@ func TestExpandHome(t *testing.T) {
 		t.Error("home is not expanded")
 	}
 }
+
+func TestInstallSkillInvalidNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		inputName  string
+		errContain string
+	}{
+		{name: "empty", inputName: "", errContain: "name must not be empty"},
+		{name: "whitespace only", inputName: " \t\n", errContain: "name must not be empty"},
+		{name: "parent traversal", inputName: "../x", errContain: "name contains invalid characters"},
+		{name: "path separator", inputName: "a/b", errContain: "name contains invalid characters"},
+		{name: "regex reject", inputName: "bad name", errContain: "name contains invalid characters"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := InstallSkillCmd{
+				Name:     tc.inputName,
+				DestBase: filepath.Join(t.TempDir(), "skills"),
+			}
+			err := cmd.Execute(nil)
+			if err == nil {
+				t.Fatalf("expected error for name=%q", tc.inputName)
+			}
+			if !strings.Contains(err.Error(), tc.errContain) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

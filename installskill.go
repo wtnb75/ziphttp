@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -17,6 +18,8 @@ type InstallSkillCmd struct {
 	DestBase string `long:"dest-base" description:"destination skills base directory" default:"~/.copilot/skills"`
 	Force    bool   `long:"force" description:"overwrite existing files"`
 }
+
+var skillNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func expandHome(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
@@ -40,15 +43,26 @@ func (cmd *InstallSkillCmd) Execute(args []string) error {
 		slog.Error("expand destination", "error", err)
 		return err
 	}
-	if cmd.Name == "" {
+	name := strings.TrimSpace(cmd.Name)
+	if name == "" {
 		return fmt.Errorf("name must not be empty")
+	}
+	if !skillNamePattern.MatchString(name) {
+		return fmt.Errorf("name contains invalid characters: %q", name)
 	}
 	if embeddedSkillMD == "" {
 		return fmt.Errorf("embedded skill content is empty")
 	}
 
-	dest := filepath.Join(destBase, cmd.Name)
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	dest := filepath.Join(destBase, name)
+	rel, err := filepath.Rel(destBase, dest)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("destination escapes base directory")
+	}
+	if err := os.MkdirAll(dest, 0o750); err != nil {
 		slog.Error("mkdir", "path", dest, "error", err)
 		return err
 	}
@@ -62,10 +76,10 @@ func (cmd *InstallSkillCmd) Execute(args []string) error {
 		}
 	}
 
-	if err := os.WriteFile(skillPath, []byte(embeddedSkillMD), 0o644); err != nil {
+	if err := os.WriteFile(skillPath, []byte(embeddedSkillMD), 0o600); err != nil {
 		slog.Error("write skill", "destination", skillPath, "error", err)
 		return err
 	}
-	fmt.Println("installed", cmd.Name, "to", dest)
+	fmt.Println("installed", name, "to", dest)
 	return nil
 }

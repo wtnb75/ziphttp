@@ -3,12 +3,63 @@ package main
 import (
 	"archive/tar"
 	"archive/zip"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+func safeOutputPath(baseDir, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("empty output path")
+	}
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", err
+	}
+	baseAbs, err = filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", err
+	}
+	cleaned := filepath.Clean(name)
+	if cleaned == "." || cleaned == ".." {
+		return "", fmt.Errorf("invalid output path: %s", name)
+	}
+	if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
+		return "", fmt.Errorf("absolute path is not allowed: %s", name)
+	}
+	targetAbs := filepath.Join(baseAbs, cleaned)
+	rel, err := filepath.Rel(baseAbs, targetAbs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path traversal detected: %s", name)
+	}
+	cur := baseAbs
+	for _, part := range strings.Split(cleaned, string(os.PathSeparator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return "", fmt.Errorf("path traversal detected: %s", name)
+		}
+		cur = filepath.Join(cur, part)
+		st, err := os.Lstat(cur)
+		if err != nil {
+			if os.IsNotExist(err) {
+				break
+			}
+			return "", err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("symlink path component is not allowed: %s", cur)
+		}
+	}
+	return targetAbs, nil
+}
 
 type ZiptoGzip struct {
 	All       bool   `short:"a" long:"all" description:"extract non-deflate file too"`
@@ -64,6 +115,11 @@ func (cmd *ZiptoGzip) output(fi *zip.File, ofp io.Writer) (int64, error) {
 
 func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 	init_log()
+	baseDir, err := os.Getwd()
+	if err != nil {
+		slog.Error("getwd", "error", err)
+		return err
+	}
 	filename := archiveFilename()
 	zipfile, err := zip.OpenReader(filename)
 	if err != nil {
@@ -131,11 +187,16 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 			}
 			slog.Debug("written", "name", fname, "written", written)
 		} else {
-			if err = os.MkdirAll(filepath.Dir(fname), 0o777); err != nil {
+			safePath, err := safeOutputPath(baseDir, fname)
+			if err != nil {
+				slog.Error("invalid output path", "name", fname, "error", err)
+				return err
+			}
+			if err = os.MkdirAll(filepath.Dir(safePath), 0o750); err != nil {
 				slog.Error("mkdir", "error", err)
 				return err
 			}
-			outfp, err := os.OpenFile(fname, os.O_CREATE|os.O_WRONLY, 0o644)
+			outfp, err := os.OpenFile(safePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 			if err != nil {
 				slog.Error("open file", "error", err)
 				return err
