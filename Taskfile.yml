@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+vars:
+  GREETING: Hello, world!
+
+tasks:
+  default:
+    desc: list tasks
+    cmds:
+      - task -l --sort alphanumeric
+    silent: true
+
+  build:
+    desc: build
+    cmds:
+      - go build
+
+  build:pkg:
+    desc: build
+    cmds:
+      - goreleaser --snapshot --clean
+
+  fmt:
+    desc: fmt
+    cmds:
+      - go fmt ./...
+      - go vet ./...
+
+  lint:
+    desc: lint
+    cmds:
+      - golangci-lint run
+
+  test:
+    desc: test
+    cmds:
+      - go test -v ./... -coverprofile=./cover.out -covermode=atomic
+        -coverpkg=./...
+      - go tool cover -func=cover.out
+
+  scan:
+    desc: scan code
+    cmds:
+      - ~/go/bin/govulncheck ./...
+      - ~/go/bin/gosec ./...
+
+  update:
+    desc: update deps
+    cmds:
+      - go get -u
+      - go mod tidy
