@@ -251,6 +251,7 @@ func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, filemap 
 		rd, err := fi.OpenRaw()
 		if err != nil {
 			slog.Error("OpenRaw", "name", fi.Name, "error", err)
+			return err
 		}
 		if written, err := io.Copy(w, rd); err != nil {
 			slog.Error("copy", "written", written, "error", err)
@@ -275,6 +276,7 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, r *http.Request, filem
 		rd, err := fi.Open()
 		if err != nil {
 			slog.Error("Open", "name", fi.Name, "error", err)
+			return err
 		}
 		defer rd.Close()
 		if written, err := io.Copy(w, rd); err != nil {

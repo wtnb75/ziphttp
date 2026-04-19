@@ -3,12 +3,34 @@ package main
 import (
 	"archive/tar"
 	"archive/zip"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+func safeOutputPath(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("empty output path")
+	}
+	cleaned := filepath.Clean(name)
+	if cleaned == "." || cleaned == ".." {
+		return "", fmt.Errorf("invalid output path: %s", name)
+	}
+	if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
+		return "", fmt.Errorf("absolute path is not allowed: %s", name)
+	}
+	rel, err := filepath.Rel(".", cleaned)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path traversal detected: %s", name)
+	}
+	return cleaned, nil
+}
 
 type ZiptoGzip struct {
 	All       bool   `short:"a" long:"all" description:"extract non-deflate file too"`
@@ -131,11 +153,16 @@ func (cmd *ZiptoGzip) Execute(args []string) (err error) {
 			}
 			slog.Debug("written", "name", fname, "written", written)
 		} else {
-			if err = os.MkdirAll(filepath.Dir(fname), 0o777); err != nil {
+			safePath, err := safeOutputPath(fname)
+			if err != nil {
+				slog.Error("invalid output path", "name", fname, "error", err)
+				return err
+			}
+			if err = os.MkdirAll(filepath.Dir(safePath), 0o750); err != nil {
 				slog.Error("mkdir", "error", err)
 				return err
 			}
-			outfp, err := os.OpenFile(fname, os.O_CREATE|os.O_WRONLY, 0o644)
+			outfp, err := os.OpenFile(safePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 			if err != nil {
 				slog.Error("open file", "error", err)
 				return err
