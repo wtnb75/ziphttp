@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"io"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -136,4 +137,64 @@ func TestArchiveOffset2(t *testing.T) {
 	if res != 1024*1024 {
 		t.Error("offset", res, "!=", 1024*1024)
 	}
+}
+
+func TestLinkRelativeXML(t *testing.T) {
+	t.Parallel()
+	in := strings.NewReader(`<urlset><url><loc>http://example.com/path/to/a</loc><image src="http://example.com/path/to/image.png"/></url></urlset>`)
+	out := &bytes.Buffer{}
+	err := LinkRelative_xml("http://example.com/path/to/index.xml", in, out)
+	if err != nil {
+		t.Error("LinkRelative_xml", err)
+	}
+}
+
+func TestLinkRelativeXMLPassthrough(t *testing.T) {
+	t.Parallel()
+	input := "<root><a href=\"http://example.com/abc\"/></root>"
+	in := strings.NewReader(input)
+	out := &bytes.Buffer{}
+	err := LinkRelative_xml("http://example.com/path/to/index.txt", in, out)
+	if err != nil {
+		t.Error("passthrough", err)
+		return
+	}
+	if out.String() != input {
+		t.Error("unexpected output", out.String())
+	}
+}
+
+func TestFilterCopy(t *testing.T) {
+	t.Parallel()
+	t.Run("with baseurl", func(t *testing.T) {
+		src := strings.NewReader(`<html><body><a href="http://example.com/path/to/a">a</a></body></html>`)
+		dst := &bytes.Buffer{}
+		written, err := filtercopy(dst, src, "http://example.com/path/to/index.html")
+		if err != nil {
+			t.Error("filtercopy", err)
+			return
+		}
+		if written == 0 {
+			t.Error("no bytes written")
+		}
+		if !strings.Contains(dst.String(), `href="a"`) {
+			t.Error("link not rewritten", dst.String())
+		}
+	})
+	t.Run("without baseurl", func(t *testing.T) {
+		srcText := "plain text"
+		src := strings.NewReader(srcText)
+		dst := &bytes.Buffer{}
+		written, err := filtercopy(dst, src, "")
+		if err != nil {
+			t.Error("filtercopy no baseurl", err)
+			return
+		}
+		if written != int64(len(srcText)) {
+			t.Error("written", written)
+		}
+		if dst.String() != srcText {
+			t.Error("mismatch", dst.String())
+		}
+	})
 }

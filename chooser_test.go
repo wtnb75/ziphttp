@@ -171,3 +171,89 @@ func TestFixCRCRelative(t *testing.T) {
 		t.Error("crc32 mismatch", cksum, cf.CRC32)
 	}
 }
+
+func TestChooseFromLast(t *testing.T) {
+	t.Parallel()
+	td := t.TempDir()
+	fileA := filepath.Join(td, "a.txt")
+	fileB := filepath.Join(td, "b.txt")
+	fileC := filepath.Join(td, "c.txt")
+	if err := os.WriteFile(fileA, []byte("same-content"), 0o600); err != nil {
+		t.Error("write a", err)
+		return
+	}
+	if err := os.WriteFile(fileB, []byte("different"), 0o600); err != nil {
+		t.Error("write b", err)
+		return
+	}
+	if err := os.WriteFile(fileC, []byte("same-content"), 0o600); err != nil {
+		t.Error("write c", err)
+		return
+	}
+	input := []*ChooseFile{
+		{Root: td, Name: "a.txt"},
+		{Root: td, Name: "b.txt"},
+		{Root: td, Name: "c.txt"},
+	}
+	res := ChooseFromLast(input, "")
+	if res != input[0] {
+		t.Error("expected first matching crc", res)
+	}
+}
+
+func TestChooseFromLastNoMatch(t *testing.T) {
+	t.Parallel()
+	td := t.TempDir()
+	if err := os.WriteFile(filepath.Join(td, "a.txt"), []byte("aaa"), 0o600); err != nil {
+		t.Error("write a", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(td, "b.txt"), []byte("bbb"), 0o600); err != nil {
+		t.Error("write b", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(td, "c.txt"), []byte("ccc"), 0o600); err != nil {
+		t.Error("write c", err)
+		return
+	}
+	input := []*ChooseFile{
+		{Root: td, Name: "a.txt"},
+		{Root: td, Name: "b.txt"},
+		{Root: td, Name: "c.txt"},
+	}
+	res := ChooseFromLast(input, "")
+	if res != input[2] {
+		t.Error("expected last when no crc match", res)
+	}
+}
+
+func TestChooseFromLastChosenFixCRCError(t *testing.T) {
+	t.Parallel()
+	td := t.TempDir()
+	if err := os.WriteFile(filepath.Join(td, "ok.txt"), []byte("ok"), 0o600); err != nil {
+		t.Error("write", err)
+		return
+	}
+	input := []*ChooseFile{
+		{Root: td, Name: "ok.txt"},
+		{Root: td, Name: "missing.txt"},
+	}
+	res := ChooseFromLast(input, "")
+	if res != input[1] {
+		t.Error("expected chosen(last) on crc error", res)
+	}
+}
+
+func TestChooseFromFixCRCAllFail(t *testing.T) {
+	t.Parallel()
+	input := []*ChooseFile{
+		{Root: t.TempDir(), Name: "missing-a.txt"},
+		{Root: t.TempDir(), Name: "missing-b.txt"},
+	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic when all FixCRC fail")
+		}
+	}()
+	_ = ChooseFrom(input, "")
+}
