@@ -257,3 +257,27 @@ func TestChooseFromFixCRCAllFail(t *testing.T) {
 	}()
 	_ = ChooseFrom(input, "")
 }
+
+func TestChooseFromNoCRC(t *testing.T) {
+	t.Parallel()
+	t.Run("empty", func(t *testing.T) {
+		if got := ChooseFromNoCRC(nil); got != nil {
+			t.Error("expected nil", got)
+		}
+	})
+	t.Run("single", func(t *testing.T) {
+		in := []*ChooseFile{{Root: "r0", Name: "a", ModTime: time.Unix(1, 0)}}
+		if got := ChooseFromNoCRC(in); got != in[0] {
+			t.Error("expected same object", got)
+		}
+	})
+	t.Run("newer preferred", func(t *testing.T) {
+		in := []*ChooseFile{
+			{Root: "r1", Name: "a", ModTime: time.Unix(1, 0), UncompressedSize: 100},
+			{Root: "r2", Name: "a", ModTime: time.Unix(2, 0), UncompressedSize: 90},
+		}
+		if got := ChooseFromNoCRC(in); got != in[1] {
+			t.Error("expected newer", got)
+		}
+	})
+}

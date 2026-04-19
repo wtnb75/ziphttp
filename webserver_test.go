@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -44,6 +45,61 @@ func TestStored(t *testing.T) {
 	}
 	if got.Result().Header.Get("Content-Encoding") == "gzip" {
 		t.Error("not stored", got.Result().Header.Get("Content-Encoding"))
+	}
+}
+
+func TestZipFileBytes(t *testing.T) {
+	t.Parallel()
+	zf, err := NewZipFileBytes(testzip)
+	if err != nil {
+		t.Error("new zip bytes", err)
+		return
+	}
+	if zf.Files() == 0 {
+		t.Error("empty files")
+		return
+	}
+	fi := zf.File(0)
+	if fi == nil {
+		t.Error("nil file")
+		return
+	}
+	rd, err := zf.Open(fi.Name)
+	if err != nil {
+		t.Error("open", err)
+		return
+	}
+	_ = rd.Close()
+	if err = zf.Close(); err != nil {
+		t.Error("close", err)
+	}
+}
+
+func TestZipFileFile(t *testing.T) {
+	t.Parallel()
+	name := prepare_testzip(t)
+	zf, err := NewZipFileFile(name)
+	if err != nil {
+		t.Error("new zip file", err)
+		return
+	}
+	if zf.Files() == 0 {
+		t.Error("empty files")
+		return
+	}
+	fi := zf.File(0)
+	if fi == nil {
+		t.Error("nil file")
+		return
+	}
+	rd, err := zf.Open(fi.Name)
+	if err != nil {
+		t.Error("open", err)
+		return
+	}
+	_ = rd.Close()
+	if err = zf.Close(); err != nil {
+		t.Error("close", err)
 	}
 }
 
@@ -484,7 +540,6 @@ func TestInitializeFile(t *testing.T) {
 }
 
 func TestReload(t *testing.T) {
-	t.Parallel()
 	zipname := prepare_testzip(t)
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self
@@ -596,7 +651,6 @@ func TestInitializeInMemory(t *testing.T) {
 }
 
 func TestReloadError(t *testing.T) {
-	t.Parallel()
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self
 	defer func() {
@@ -649,6 +703,53 @@ func TestMultipleArchiveInitializeAndServe(t *testing.T) {
 	}
 	if !strings.Contains(got.Body.String(), "from-custom") {
 		t.Error("body", got.Body.String())
+	}
+}
+
+func TestWebServerExecuteInitializeError(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename("/not/found/archive.zip")
+
+	cmd := WebServer{Listen: "127.0.0.1:0"}
+	if err := cmd.Execute(nil); err == nil {
+		t.Error("expected initialize error")
+	}
+}
+
+func TestWebServerExecuteInvalidHeader(t *testing.T) {
+	zipname := prepare_testzip(t)
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipname)
+
+	cmd := WebServer{Listen: "127.0.0.1:0", Headers: []string{"invalid-header"}}
+	err := cmd.Execute(nil)
+	if err == nil {
+		t.Error("expected invalid header error")
+		return
+	}
+	if !strings.Contains(err.Error(), "invalid header") {
+		t.Error("unexpected error", err)
+	}
+}
+
+func TestShutdown(t *testing.T) {
+	t.Parallel()
+	cmd := WebServer{}
+	err := cmd.Shutdown()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		t.Error("shutdown", err)
 	}
 }
 

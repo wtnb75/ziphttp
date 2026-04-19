@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -139,6 +140,19 @@ func TestArchiveOffset2(t *testing.T) {
 	}
 }
 
+func TestArchiveOffsetOld(t *testing.T) {
+	t.Parallel()
+	fname := prepare_testzip(t)
+	res, err := ArchiveOffset_Old(fname)
+	if err != nil {
+		t.Error("ArchiveOffset_Old", err)
+		return
+	}
+	if res < 0 {
+		t.Error("offset", res)
+	}
+}
+
 func TestLinkRelativeXML(t *testing.T) {
 	t.Parallel()
 	in := strings.NewReader(`<urlset><url><loc>http://example.com/path/to/a</loc><image src="http://example.com/path/to/image.png"/></url></urlset>`)
@@ -196,5 +210,82 @@ func TestFilterCopy(t *testing.T) {
 		if dst.String() != srcText {
 			t.Error("mismatch", dst.String())
 		}
+	})
+}
+
+func TestFixLink(t *testing.T) {
+	t.Parallel()
+	t.Run("same host to relative", func(t *testing.T) {
+		got := fix_link("http://example.com/path/to/index.html", "http://example.com/path/to/a.html")
+		if got != "a.html" {
+			t.Error("unexpected", got)
+		}
+	})
+	t.Run("different host unchanged", func(t *testing.T) {
+		in := "http://other.example.com/path/to/a.html"
+		if got := fix_link("http://example.com/path/to/index.html", in); got != in {
+			t.Error("unexpected", got)
+		}
+	})
+	t.Run("with userinfo unchanged", func(t *testing.T) {
+		in := "http://u:p@example.com/path/to/a.html"
+		if got := fix_link("http://example.com/path/to/index.html", in); got != in {
+			t.Error("unexpected", got)
+		}
+	})
+	t.Run("invalid base unchanged", func(t *testing.T) {
+		in := "/a.html"
+		if got := fix_link("://invalid", in); got != in {
+			t.Error("unexpected", got)
+		}
+	})
+}
+
+type errReader struct{}
+
+func (errReader) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("forced read error")
+}
+
+func TestLinkRelativeHTMLParseError(t *testing.T) {
+	t.Parallel()
+	buf := &bytes.Buffer{}
+	err := LinkRelative_html("http://example.com/index.html", errReader{}, buf)
+	if err == nil {
+		t.Error("expected parse error")
+	}
+}
+
+func TestZipPassThru(t *testing.T) {
+	t.Parallel()
+	name := prepare_testzip(t)
+	zr, err := zip.OpenReader(name)
+	if err != nil {
+		t.Error("open zip", err)
+		return
+	}
+	defer zr.Close()
+
+	t.Run("success", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		zw := zip.NewWriter(buf)
+		if err := ZipPassThru(zw, zr.File[:1]); err != nil {
+			t.Error("ZipPassThru", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Error("close", err)
+		}
+		if buf.Len() == 0 {
+			t.Error("empty output")
+		}
+	})
+
+	t.Run("writer closed", func(t *testing.T) {
+		zw := zip.NewWriter(&bytes.Buffer{})
+		if err := zw.Close(); err != nil {
+			t.Error("close", err)
+			return
+		}
+		_ = ZipPassThru(zw, zr.File[:1])
 	})
 }

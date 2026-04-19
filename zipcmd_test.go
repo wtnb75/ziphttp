@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jessevdk/go-flags"
 )
@@ -417,6 +419,187 @@ func TestZipCmdDel(t *testing.T) {
 		}
 		zipcmd_helper_check(t, outfile, expected)
 	}
+}
+
+func TestZipCmdSortFiles(t *testing.T) {
+	t.Parallel()
+	makeInput := func() []*zip.File {
+		return []*zip.File{
+			{FileHeader: zip.FileHeader{Name: "b", Modified: time.Unix(20, 0), CompressedSize64: 30, UncompressedSize64: 300}},
+			{FileHeader: zip.FileHeader{Name: "a", Modified: time.Unix(10, 0), CompressedSize64: 10, UncompressedSize64: 100}},
+			{FileHeader: zip.FileHeader{Name: "c", Modified: time.Unix(30, 0), CompressedSize64: 20, UncompressedSize64: 200}},
+		}
+	}
+	getNames := func(files []*zip.File) string {
+		res := ""
+		for _, f := range files {
+			res += f.Name
+		}
+		return res
+	}
+	tests := []struct {
+		name     string
+		sortBy   string
+		reverse  bool
+		expected string
+	}{
+		{name: "name asc", sortBy: "name", reverse: false, expected: "abc"},
+		{name: "name desc", sortBy: "name", reverse: true, expected: "cba"},
+		{name: "time asc", sortBy: "time", reverse: false, expected: "abc"},
+		{name: "time desc", sortBy: "time", reverse: true, expected: "cba"},
+		{name: "usize asc", sortBy: "usize", reverse: false, expected: "acb"},
+		{name: "usize desc", sortBy: "usize", reverse: true, expected: "bca"},
+		{name: "csize asc", sortBy: "csize", reverse: false, expected: "acb"},
+		{name: "csize desc", sortBy: "csize", reverse: true, expected: "bca"},
+		{name: "none", sortBy: "none", reverse: false, expected: "bac"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			files := makeInput()
+			cmd := ZipCmd{SortBy: tc.sortBy, Reverse: tc.reverse}
+			cmd.sort_files(files)
+			if got := getNames(files); got != tc.expected {
+				t.Error("order", tc.name, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestZipCmdGenerateSitemap(t *testing.T) {
+	t.Parallel()
+	t.Run("disabled", func(t *testing.T) {
+		cmd := ZipCmd{SiteMap: ""}
+		buf := &bytes.Buffer{}
+		zw := zip.NewWriter(buf)
+		root := SiteMapRoot{}
+		if err := root.initialize(); err != nil {
+			t.Error("init", err)
+		}
+		if err := cmd.generate_sitemap(&root, zw); err != nil {
+			t.Error("generate", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Error("close", err)
+		}
+	})
+
+	t.Run("enabled no createheader error", func(t *testing.T) {
+		cmd := ZipCmd{SiteMap: "https://example.com"}
+		buf := &bytes.Buffer{}
+		zw := zip.NewWriter(buf)
+		root := SiteMapRoot{}
+		if err := root.initialize(); err != nil {
+			t.Error("init", err)
+		}
+		if err := root.AddFile("https://example.com", "index.html", "a/index.html", time.Unix(1, 0)); err != nil {
+			t.Error("add", err)
+		}
+		if err := cmd.generate_sitemap(&root, zw); err != nil {
+			t.Error("generate", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Error("close", err)
+		}
+	})
+
+}
+
+func TestZipCmdCopyCompressJob(t *testing.T) {
+	t.Parallel()
+	t.Run("skip store", func(t *testing.T) {
+		td := t.TempDir()
+		name := filepath.Join(td, "small.txt")
+		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {
+			t.Error("write", err)
+			return
+		}
+		cf := &ChooseFile{Root: td, Name: "small.txt", UncompressedSize: 1}
+		jobs := make(chan CompressWork, 1)
+		cmd := ZipCmd{method: zip.Deflate, MinSize: 10, SkipStore: true}
+		if err := cmd.copy_compress_job(jobs, "small.txt", cf); err != nil {
+			t.Error("copy_compress_job", err)
+		}
+		if len(jobs) != 0 {
+			t.Error("job should be skipped", len(jobs))
+		}
+	})
+
+	t.Run("invalid baseurl", func(t *testing.T) {
+		td := t.TempDir()
+		name := filepath.Join(td, "a.txt")
+		if err := os.WriteFile(name, []byte("hello"), 0o600); err != nil {
+			t.Error("write", err)
+			return
+		}
+		cf := &ChooseFile{Root: td, Name: "a.txt", UncompressedSize: 5}
+		jobs := make(chan CompressWork, 1)
+		cmd := ZipCmd{method: zip.Deflate, BaseURL: "://invalid"}
+		if err := cmd.copy_compress_job(jobs, "a.txt", cf); err == nil {
+			t.Error("expected error")
+		}
+	})
+}
+
+func TestZipCmdCompressProcess(t *testing.T) {
+	t.Parallel()
+	t.Run("NoCRC path", func(t *testing.T) {
+		td := t.TempDir()
+		if err := os.WriteFile(filepath.Join(td, "a.txt"), []byte("abc"), 0o600); err != nil {
+			t.Error("write", err)
+			return
+		}
+		cmd := ZipCmd{
+			method: zip.Deflate,
+			NoCRC:  true,
+			nametable: map[string][]*ChooseFile{
+				"a.txt": {
+					{Root: td, Name: "a.txt", ModTime: time.Unix(1, 0), UncompressedSize: 3},
+					{Root: td, Name: "a.txt", ModTime: time.Unix(2, 0), UncompressedSize: 3},
+				},
+			},
+		}
+		jobs := make(chan CompressWork, 2)
+		sm := SiteMapRoot{}
+		_ = sm.initialize()
+		zipw := zip.NewWriter(&bytes.Buffer{})
+		if err := cmd.compress_process(&sm, zipw, jobs); err != nil {
+			t.Error("compress_process", err)
+		}
+		if len(jobs) == 0 {
+			t.Error("expected queued job")
+		}
+	})
+
+	t.Run("Last path", func(t *testing.T) {
+		td := t.TempDir()
+		if err := os.WriteFile(filepath.Join(td, "a.txt"), []byte("abc"), 0o600); err != nil {
+			t.Error("write", err)
+			return
+		}
+		if err := os.WriteFile(filepath.Join(td, "b.txt"), []byte("abc"), 0o600); err != nil {
+			t.Error("write", err)
+			return
+		}
+		cmd := ZipCmd{
+			method:  zip.Deflate,
+			Last:    true,
+			BaseURL: "https://example.com/base",
+			args:    []string{td, td},
+			nametable: map[string][]*ChooseFile{
+				"a.txt": {
+					{Root: td, Name: "a.txt", UncompressedSize: 3},
+					{Root: td, Name: "b.txt", UncompressedSize: 3},
+				},
+			},
+		}
+		jobs := make(chan CompressWork, 2)
+		sm := SiteMapRoot{}
+		_ = sm.initialize()
+		zipw := zip.NewWriter(&bytes.Buffer{})
+		if err := cmd.compress_process(&sm, zipw, jobs); err != nil {
+			t.Error("compress_process last", err)
+		}
+	})
 }
 
 func TestZipCmdSkipStore(t *testing.T) {

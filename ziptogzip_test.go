@@ -3,11 +3,13 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jessevdk/go-flags"
 )
@@ -76,6 +78,12 @@ func TestZiptoGzipNameSize(t *testing.T) {
 		{"deflate", zip.Deflate, "a.txt", 10, 100, "a.txt.gz", 10 + GzipHeaderSize + GzipFooterSize},
 		{"brotli", Brotli, "b.txt", 20, 200, "b.txt.br", 20},
 		{"zstd", Zstd, "c.txt", 30, 300, "c.txt.zstd", 30},
+		{"lzma", Lzma, "d.txt", 40, 400, "d.txt.lzma", 40},
+		{"bzip2", Bzip2, "e.txt", 50, 500, "e.txt.bz2", 50},
+		{"xz", Xz, "f.txt", 60, 600, "f.txt.xz", 60},
+		{"jpeg", Jpeg, "g.txt", 70, 700, "g.txt.jpeg", 70},
+		{"mp3", Mp3, "h.txt", 80, 800, "h.txt.mp3", 80},
+		{"webpack", Webpack, "i.txt", 90, 900, "i.txt.wv", 90},
 		{"store", zip.Store, "d.txt", 40, 400, "d.txt", 400},
 	}
 	for _, tt := range tdata {
@@ -117,10 +125,7 @@ func TestZiptoGzipOutput(t *testing.T) {
 }
 
 func TestZiptoGzipExecuteTar(t *testing.T) {
-	t.Parallel()
 	zipname := prepare_testzip(t)
-	out := filepath.Join(t.TempDir(), "out.tar")
-
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self
 	defer func() {
@@ -130,23 +135,25 @@ func TestZiptoGzipExecuteTar(t *testing.T) {
 	globalOption.Self = false
 	globalOption.Archive = flags.Filename(zipname)
 
-	cmd := ZiptoGzip{All: true, Tar: out, TarFormat: "GNU"}
-	if err := cmd.Execute([]string{"4kb.txt"}); err != nil {
-		t.Error("execute", err)
-		return
-	}
-	st, err := os.Stat(out)
-	if err != nil {
-		t.Error("stat", err)
-		return
-	}
-	if st.Size() == 0 {
-		t.Error("empty tar")
+	for _, tf := range []string{"GNU", "PAX", "USTAR"} {
+		out := filepath.Join(t.TempDir(), "out-"+tf+".tar")
+		cmd := ZiptoGzip{All: true, Tar: out, TarFormat: tf}
+		if err := cmd.Execute([]string{"4kb.txt"}); err != nil {
+			t.Error("execute", tf, err)
+			continue
+		}
+		st, err := os.Stat(out)
+		if err != nil {
+			t.Error("stat", tf, err)
+			continue
+		}
+		if st.Size() == 0 {
+			t.Error("empty tar", tf)
+		}
 	}
 }
 
 func TestZiptoGzipExecuteNoArchive(t *testing.T) {
-	t.Parallel()
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self
 	defer func() {
@@ -160,4 +167,64 @@ func TestZiptoGzipExecuteNoArchive(t *testing.T) {
 	if err := cmd.Execute(nil); err == nil {
 		t.Error("expected error")
 	}
+}
+
+func TestZiptoGzipOutputRawMethod(t *testing.T) {
+	t.Parallel()
+	zipname := filepath.Join(t.TempDir(), "rawmethod.zip")
+	raw := []byte("raw-brotli-stream")
+	if err := createRawMethodZip(zipname, Brotli, "raw.dat", raw); err != nil {
+		t.Error("create raw zip", err)
+		return
+	}
+	zf, err := zip.OpenReader(zipname)
+	if err != nil {
+		t.Error("open zip", err)
+		return
+	}
+	defer zf.Close()
+	if len(zf.File) != 1 {
+		t.Error("file count", len(zf.File))
+		return
+	}
+	buf := &bytes.Buffer{}
+	cmd := ZiptoGzip{}
+	written, err := cmd.output(zf.File[0], buf)
+	if err != nil {
+		t.Error("output", err)
+		return
+	}
+	if written != int64(len(raw)) {
+		t.Error("written", written)
+	}
+	if !bytes.Equal(buf.Bytes(), raw) {
+		t.Error("raw mismatch", buf.Bytes())
+	}
+}
+
+func createRawMethodZip(path string, method uint16, name string, raw []byte) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	fh := zip.FileHeader{
+		Name:               name,
+		Method:             method,
+		Modified:           time.Unix(1, 0),
+		CompressedSize64:   uint64(len(raw)),
+		UncompressedSize64: uint64(len(raw)),
+		CRC32:              crc32.ChecksumIEEE(raw),
+	}
+	w, err := zw.CreateRaw(&fh)
+	if err != nil {
+		_ = zw.Close()
+		return err
+	}
+	if _, err = w.Write(raw); err != nil {
+		_ = zw.Close()
+		return err
+	}
+	return zw.Close()
 }

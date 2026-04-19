@@ -121,3 +121,26 @@ func TestNoCommand(t *testing.T) {
 		t.Error("install-skill")
 	}
 }
+
+func TestVersionCommand(t *testing.T) {
+	stdout, _ := runcmd_test(t, []string{"ziphttp", "version"}, 0)
+	if !strings.Contains(stdout, "ziphttp") {
+		t.Error("missing command name")
+	}
+	if !strings.Contains(stdout, version) {
+		t.Error("missing version", stdout)
+	}
+}
+
+func TestVersionCommandFull(t *testing.T) {
+	stdout, _ := runcmd_test(t, []string{"ziphttp", "version", "--full-version"}, 0)
+	if !strings.Contains(stdout, "hash") {
+		t.Error("missing hash", stdout)
+	}
+	if !strings.Contains(stdout, commit) {
+		t.Error("missing commit", stdout)
+	}
+	if !strings.Contains(stdout, date) {
+		t.Error("missing date", stdout)
+	}
+}
