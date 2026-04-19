@@ -219,8 +219,6 @@ func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap 
 		if etag != "" {
 			w.Header().Add("Etag", etag)
 		}
-		*statuscode = http.StatusOK
-		w.WriteHeader(*statuscode)
 		return fi, nil
 	}
 	return nil, fmt.Errorf("not found")
@@ -232,6 +230,8 @@ func (h *ZipHandler) handle_gzip(w http.ResponseWriter, r *http.Request, filemap
 		return err
 	}
 	if fi != nil {
+		*statuscode = http.StatusOK
+		w.WriteHeader(*statuscode)
 		if written, err := CopyGzip(w, fi); err != nil {
 			slog.Error("copygzip", "written", written, "error", err)
 		} else {
@@ -251,8 +251,11 @@ func (h *ZipHandler) handle_raw(w http.ResponseWriter, r *http.Request, filemap 
 		rd, err := fi.OpenRaw()
 		if err != nil {
 			slog.Error("OpenRaw", "name", fi.Name, "error", err)
+			*statuscode = http.StatusInternalServerError
 			return err
 		}
+		*statuscode = http.StatusOK
+		w.WriteHeader(*statuscode)
 		if written, err := io.Copy(w, rd); err != nil {
 			slog.Error("copy", "written", written, "error", err)
 		} else {
@@ -276,9 +279,12 @@ func (h *ZipHandler) handle_normal(w http.ResponseWriter, r *http.Request, filem
 		rd, err := fi.Open()
 		if err != nil {
 			slog.Error("Open", "name", fi.Name, "error", err)
+			*statuscode = http.StatusInternalServerError
 			return err
 		}
 		defer rd.Close()
+		*statuscode = http.StatusOK
+		w.WriteHeader(*statuscode)
 		if written, err := io.Copy(w, rd); err != nil {
 			slog.Error("copy", "written", written, "error", err)
 		} else {
