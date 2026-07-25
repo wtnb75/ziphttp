@@ -2,4 +2,8 @@
 !go.mod
 !go.sum
 !*.go
+!.github/
+!.github/skills/
+!.github/skills/ziphttp/
+!.github/skills/ziphttp/SKILL.md
 *_test.go
