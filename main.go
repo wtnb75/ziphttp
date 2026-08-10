@@ -44,7 +44,7 @@ type SubCommand struct {
 	Name  string
 	Short string
 	Long  string
-	Data  interface{}
+	Data  any
 }
 
 func realMain() int {

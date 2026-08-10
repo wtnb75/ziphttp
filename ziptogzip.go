@@ -39,7 +39,7 @@ func safeOutputPath(baseDir, name string) (string, error) {
 		return "", fmt.Errorf("path traversal detected: %s", name)
 	}
 	cur := baseAbs
-	for _, part := range strings.Split(cleaned, string(os.PathSeparator)) {
+	for part := range strings.SplitSeq(cleaned, string(os.PathSeparator)) {
 		if part == "" || part == "." {
 			continue
 		}
