@@ -360,13 +360,13 @@ func zipcmd_helper_check(t *testing.T, zipfile string, expected []string) {
 	if len(zr.File) != len(expected) {
 		t.Error("file count mismatch", "in-zip", len(zr.File), "expected", len(expected))
 	}
-	names := ""
+	var names strings.Builder
 	for _, v := range zr.File {
-		names += "<" + v.Name + ">, "
+		names.WriteString("<" + v.Name + ">, ")
 	}
-	t.Log("names-in-zip are:", names)
+	t.Log("names-in-zip are:", names.String())
 	for _, v := range expected {
-		if !strings.Contains(names, "<"+v+">") {
+		if !strings.Contains(names.String(), "<"+v+">") {
 			t.Error("not found", zipfile, v)
 		}
 	}
@@ -431,11 +431,11 @@ func TestZipCmdSortFiles(t *testing.T) {
 		}
 	}
 	getNames := func(files []*zip.File) string {
-		res := ""
+		var res strings.Builder
 		for _, f := range files {
-			res += f.Name
+			res.WriteString(f.Name)
 		}
-		return res
+		return res.String()
 	}
 	tests := []struct {
 		name     string

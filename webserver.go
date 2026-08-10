@@ -417,8 +417,8 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statuscode)
 		return
 	}
-	if strings.HasSuffix(fname, ".gz") {
-		if idx, ok := h.methodmap[strings.TrimSuffix(fname, ".gz")][zip.Deflate]; ok {
+	if before, ok := strings.CutSuffix(fname, ".gz"); ok {
+		if idx, ok := h.methodmap[before][zip.Deflate]; ok {
 			slog.Debug("gzip file", "name", fname)
 			fi := h.getidx(idx)
 			if fi == nil {
