@@ -825,7 +825,6 @@ func createSimpleZip(path, name string, content []byte) error {
 }
 
 func TestStartAutoReloadAddError(t *testing.T) {
-	t.Parallel()
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self
 	defer func() {
