@@ -734,40 +734,11 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	}()
 
 	if cmd.AutoReload {
-		wt, err := fsnotify.NewWatcher()
+		wt, err := cmd.startAutoReload()
 		if err != nil {
-			slog.Error("watcher", "error", err)
-		}
-		defer wt.Close()
-		go func() {
-			for {
-				select {
-				case event, ok := <-wt.Events:
-					if !ok {
-						slog.Error("cannot process event", "event", event)
-						return
-					}
-					slog.Info("got watcher event", "event", event, "op", event.Op.String())
-					if event.Has(fsnotify.Write) {
-						slog.Info("modified", "name", event.Name)
-						if err = cmd.Reload(); err != nil {
-							slog.Error("reload error", "error", err)
-						}
-					}
-				case err, ok := <-wt.Errors:
-					if !ok {
-						slog.Error("cannot process error", "error", err)
-						return
-					}
-					slog.Info("got watcher error", "error", err)
-				}
-			}
-		}()
-
-		if err = wt.Add(archiveFilename()); err != nil {
-			slog.Error("watcher add", "error", err)
 			return err
 		}
+		defer wt.Close()
 	}
 
 	listener, err := do_listen(cmd.Listen)
@@ -783,6 +754,64 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	}
 	slog.Info("server closed", "msg", err)
 	return nil
+}
+
+// startAutoReload sets up the fsnotify watcher and its event loop for
+// --autoreload. On any setup failure it returns (nil, err); it never
+// returns a watcher the caller must clean up alongside a non-nil error.
+func (cmd *WebServer) startAutoReload() (*fsnotify.Watcher, error) {
+	wt, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("watcher", "error", err)
+		return nil, err
+	}
+	path := archiveFilename()
+	go autoReloadLoop(wt, cmd, path)
+	if err := wt.Add(path); err != nil {
+		slog.Error("watcher add", "error", err)
+		wt.Close()
+		return nil, err
+	}
+	return wt, nil
+}
+
+// autoReloadLoop reacts to filesystem events on the watched archive.
+// fsnotify watches by inode, so a Write (in-place modification) is
+// handled directly, while Remove/Rename (e.g. an atomic replace via
+// write-to-tmp + os.Rename) requires re-arming the watch on the new
+// inode at the same path before reloading.
+func autoReloadLoop(wt *fsnotify.Watcher, cmd *WebServer, watchPath string) {
+	for {
+		select {
+		case event, ok := <-wt.Events:
+			if !ok {
+				slog.Error("watcher events channel closed")
+				return
+			}
+			slog.Info("got watcher event", "event", event, "op", event.Op.String())
+			switch {
+			case event.Has(fsnotify.Write):
+				slog.Info("modified", "name", event.Name)
+				if err := cmd.Reload(); err != nil {
+					slog.Error("reload error", "error", err)
+				}
+			case event.Has(fsnotify.Remove), event.Has(fsnotify.Rename):
+				slog.Info("watched file replaced, re-arming watch", "name", event.Name)
+				if err := wt.Add(watchPath); err != nil {
+					slog.Error("re-add watcher", "error", err)
+				}
+				if err := cmd.Reload(); err != nil {
+					slog.Error("reload error", "error", err)
+				}
+			}
+		case err, ok := <-wt.Errors:
+			if !ok {
+				slog.Error("watcher errors channel closed")
+				return
+			}
+			slog.Info("got watcher error", "error", err)
+		}
+	}
 }
 
 func (cmd *WebServer) Shutdown() error {
