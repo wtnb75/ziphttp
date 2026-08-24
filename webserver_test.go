@@ -833,6 +833,9 @@ func openFDCount(t *testing.T) int {
 	return len(entries)
 }
 
+// Not t.Parallel(): /dev/fd is a process-global count, so running
+// concurrently with other tests that open files would make the
+// before/after comparison flaky.
 func TestInitializeFilePartialFailureClosesOpenedFiles(t *testing.T) {
 	dir := t.TempDir()
 	zip1 := filepath.Join(dir, "a.zip")

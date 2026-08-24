@@ -795,16 +795,16 @@ func autoReloadLoop(wt *fsnotify.Watcher, cmd *WebServer, watchPath string) {
 			}
 			slog.Info("got watcher event", "event", event, "op", event.Op.String())
 			switch {
-			case event.Has(fsnotify.Write):
-				slog.Info("modified", "name", event.Name)
-				if err := cmd.Reload(); err != nil {
-					slog.Error("reload error", "error", err)
-				}
 			case event.Has(fsnotify.Remove), event.Has(fsnotify.Rename):
 				slog.Info("watched file replaced, re-arming watch", "name", event.Name)
 				if err := wt.Add(watchPath); err != nil {
 					slog.Error("re-add watcher", "error", err)
 				}
+				if err := cmd.Reload(); err != nil {
+					slog.Error("reload error", "error", err)
+				}
+			case event.Has(fsnotify.Write):
+				slog.Info("modified", "name", event.Name)
 				if err := cmd.Reload(); err != nil {
 					slog.Error("reload error", "error", err)
 				}
