@@ -824,6 +824,35 @@ func createSimpleZip(path, name string, content []byte) error {
 	return nil
 }
 
+func openFDCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/dev/fd")
+	if err != nil {
+		t.Skip("cannot inspect /dev/fd on this platform:", err)
+	}
+	return len(entries)
+}
+
+func TestInitializeFilePartialFailureClosesOpenedFiles(t *testing.T) {
+	dir := t.TempDir()
+	zip1 := filepath.Join(dir, "a.zip")
+	if err := createSimpleZip(zip1, "a.txt", []byte("hello")); err != nil {
+		t.Fatal("create zip1", err)
+	}
+	missing := filepath.Join(dir, "does-not-exist.zip")
+
+	h := ZipHandler{methodmap: make(map[string]map[uint16]int)}
+
+	before := openFDCount(t)
+	if err := h.initialize_file([]string{zip1, missing}); err == nil {
+		t.Error("expected error for missing second file")
+	}
+	after := openFDCount(t)
+	if after > before {
+		t.Errorf("leaked file descriptors: before=%d after=%d", before, after)
+	}
+}
+
 func TestStartAutoReloadAddError(t *testing.T) {
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self

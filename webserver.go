@@ -579,6 +579,11 @@ func (h *ZipHandler) initialize_file(input []string) error {
 	for _, v := range input {
 		zipfile, err := NewZipFileFile(v)
 		if err != nil {
+			for _, opened := range zipfiles {
+				if cerr := opened.Close(); cerr != nil {
+					slog.Error("close zipfile after partial failure", "error", cerr)
+				}
+			}
 			return err
 		}
 		zipfiles = append(zipfiles, zipfile)
