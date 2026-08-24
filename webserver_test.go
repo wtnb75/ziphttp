@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -663,6 +664,34 @@ func TestReloadError(t *testing.T) {
 	cmd := WebServer{handler: ZipHandler{methodmap: make(map[string]map[uint16]int)}}
 	if err := cmd.Reload(); err == nil {
 		t.Error("expected reload error")
+	}
+}
+
+func TestHandleSignalReloadFailureDoesNotExit(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename("/not/found/archive-for-sighup.zip")
+
+	cmd := WebServer{handler: ZipHandler{methodmap: make(map[string]map[uint16]int)}}
+
+	exit := cmd.handleSignal(syscall.SIGHUP)
+	if exit {
+		t.Error("expected handleSignal(SIGHUP) to return false (keep listening) even when Reload fails")
+	}
+}
+
+func TestHandleSignalTermExits(t *testing.T) {
+	t.Parallel()
+	cmd := WebServer{}
+
+	exit := cmd.handleSignal(syscall.SIGTERM)
+	if !exit {
+		t.Error("expected handleSignal(SIGTERM) to return true (stop listening)")
 	}
 }
 

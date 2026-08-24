@@ -724,20 +724,10 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	go func() {
-		var err error
 		for {
 			sig := <-sigs
 			slog.Info("caught signal", "signal", sig)
-			switch sig {
-			case syscall.SIGHUP:
-				if err = cmd.Reload(); err != nil {
-					slog.Error("reload failed", "error", err)
-					return
-				}
-			case syscall.SIGINT, syscall.SIGTERM:
-				if err = cmd.Shutdown(); err != nil {
-					slog.Error("terminate failed", "error", err)
-				}
+			if cmd.handleSignal(sig) {
 				return
 			}
 		}
@@ -798,6 +788,24 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 func (cmd *WebServer) Shutdown() error {
 	slog.Info("graceful shutdown")
 	return cmd.server.Shutdown(context.TODO())
+}
+
+// handleSignal processes one OS signal and reports whether the caller
+// should stop listening for further signals.
+func (cmd *WebServer) handleSignal(sig os.Signal) (exit bool) {
+	switch sig {
+	case syscall.SIGHUP:
+		if err := cmd.Reload(); err != nil {
+			slog.Error("reload failed", "error", err)
+		}
+		return false
+	case syscall.SIGINT, syscall.SIGTERM:
+		if err := cmd.Shutdown(); err != nil {
+			slog.Error("terminate failed", "error", err)
+		}
+		return true
+	}
+	return false
 }
 
 func (cmd *WebServer) Reload() error {
