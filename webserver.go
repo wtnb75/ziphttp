@@ -782,9 +782,14 @@ func (cmd *WebServer) startAutoReload() (*fsnotify.Watcher, error) {
 
 // autoReloadLoop reacts to filesystem events on the watched archive.
 // fsnotify watches by inode, so a Write (in-place modification) is
-// handled directly, while Remove/Rename (e.g. an atomic replace via
-// write-to-tmp + os.Rename) requires re-arming the watch on the new
-// inode at the same path before reloading.
+// handled directly, while an atomic replace (write-to-tmp + os.Rename
+// over the watched path) requires re-arming the watch on the new inode
+// at the same path before reloading. Which event that replace actually
+// delivers is platform-dependent: kqueue (macOS/BSD) reports
+// Remove/Rename; inotify (Linux) instead reports Chmod, because
+// overwriting the watched path drops its link count to zero, which
+// inotify surfaces as an attribute change (IN_ATTRIB) rather than a
+// delete/rename of the watch itself. All three are treated the same way.
 func autoReloadLoop(wt *fsnotify.Watcher, cmd *WebServer, watchPath string) {
 	for {
 		select {
@@ -795,7 +800,7 @@ func autoReloadLoop(wt *fsnotify.Watcher, cmd *WebServer, watchPath string) {
 			}
 			slog.Info("got watcher event", "event", event, "op", event.Op.String())
 			switch {
-			case event.Has(fsnotify.Remove), event.Has(fsnotify.Rename):
+			case event.Has(fsnotify.Remove), event.Has(fsnotify.Rename), event.Has(fsnotify.Chmod):
 				slog.Info("watched file replaced, re-arming watch", "name", event.Name)
 				if err := wt.Add(watchPath); err != nil {
 					slog.Error("re-add watcher", "error", err)
