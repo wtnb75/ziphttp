@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -137,6 +138,54 @@ func TestArchiveOffset2(t *testing.T) {
 	}
 	if res != 1024*1024 {
 		t.Error("offset", res, "!=", 1024*1024)
+	}
+}
+
+func TestArchiveOffsetEOCDNotFound(t *testing.T) {
+	t.Parallel()
+	tmpf, err := os.CreateTemp(t.TempDir(), "")
+	if err != nil {
+		t.Fatal("tempfile", err)
+	}
+	defer os.Remove(tmpf.Name())
+	// 600 zero bytes: long enough for the -512-from-end seek to succeed,
+	// but contains no EOCD signature anywhere.
+	if _, err := tmpf.Write(make([]byte, 600)); err != nil {
+		t.Fatal("write", err)
+	}
+	tmpf.Close()
+
+	if _, err := ArchiveOffset(tmpf.Name()); err == nil {
+		t.Error("expected error when EOCD signature is not found")
+	}
+}
+
+func TestArchiveOffsetInvalidCentralDirectorySignature(t *testing.T) {
+	t.Parallel()
+	tmpf, err := os.CreateTemp(t.TempDir(), "")
+	if err != nil {
+		t.Fatal("tempfile", err)
+	}
+	defer os.Remove(tmpf.Name())
+
+	// 500 zero bytes of padding, then a hand-built 22-byte EOCD record
+	// whose cdsize (50) points back into the zero padding -- so the
+	// "central directory head" ArchiveOffset seeks to is all zero bytes,
+	// which can never start with the PK\x01\x02 signature.
+	padding := make([]byte, 500)
+	if _, err := tmpf.Write(padding); err != nil {
+		t.Fatal("write padding", err)
+	}
+	eocd := make([]byte, 22)
+	copy(eocd[0:4], []byte{0x50, 0x4b, 0x05, 0x06})
+	binary.LittleEndian.PutUint32(eocd[12:16], 50) // cdsize
+	if _, err := tmpf.Write(eocd); err != nil {
+		t.Fatal("write eocd", err)
+	}
+	tmpf.Close()
+
+	if _, err := ArchiveOffset(tmpf.Name()); err == nil {
+		t.Error("expected error for invalid central directory signature")
 	}
 }
 

@@ -133,6 +133,7 @@ func ArchiveOffset(archivefile string) (int64, error) {
 	idx := bytes.LastIndex(tail[0:sz], []byte{0x50, 0x4b, 0x05, 0x06})
 	if idx == -1 {
 		slog.Error("end of central directory not found", "name", archivefile, "bytes", tail)
+		return 0, fmt.Errorf("end of central directory not found: %s", archivefile)
 	}
 	cdsize := binary.LittleEndian.Uint32(tail[idx+0xc : idx+0xc+4])
 	cur, err = fp.Seek(-512+int64(idx)-int64(cdsize), io.SeekEnd)
@@ -148,7 +149,7 @@ func ArchiveOffset(archivefile string) (int64, error) {
 	}
 	if !bytes.HasPrefix(cdhead, []byte{0x50, 0x4b, 0x1, 0x2}) {
 		slog.Error("invalid signature", "signature", cdhead[0:4])
-		return 0, err
+		return 0, fmt.Errorf("invalid central directory signature: %x", cdhead[0:4])
 	}
 	return int64(binary.LittleEndian.Uint32(cdhead[0x2a:0x2e])), nil
 }
