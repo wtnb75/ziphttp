@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -666,6 +667,34 @@ func TestReloadError(t *testing.T) {
 	}
 }
 
+func TestHandleSignalReloadFailureDoesNotExit(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename("/not/found/archive-for-sighup.zip")
+
+	cmd := WebServer{handler: ZipHandler{methodmap: make(map[string]map[uint16]int)}}
+
+	exit := cmd.handleSignal(syscall.SIGHUP)
+	if exit {
+		t.Error("expected handleSignal(SIGHUP) to return false (keep listening) even when Reload fails")
+	}
+}
+
+func TestHandleSignalTermExits(t *testing.T) {
+	t.Parallel()
+	cmd := WebServer{}
+
+	exit := cmd.handleSignal(syscall.SIGTERM)
+	if !exit {
+		t.Error("expected handleSignal(SIGTERM) to return true (stop listening)")
+	}
+}
+
 func TestDoListen(t *testing.T) {
 	t.Parallel()
 	ln, err := do_listen("tcp:127.0.0.1:0")
@@ -793,4 +822,122 @@ func createSimpleZip(path, name string, content []byte) error {
 		return err
 	}
 	return nil
+}
+
+func openFDCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/dev/fd")
+	if err != nil {
+		t.Skip("cannot inspect /dev/fd on this platform:", err)
+	}
+	return len(entries)
+}
+
+// Not t.Parallel(): /dev/fd is a process-global count, so running
+// concurrently with other tests that open files would make the
+// before/after comparison flaky.
+func TestInitializeFilePartialFailureClosesOpenedFiles(t *testing.T) {
+	dir := t.TempDir()
+	zip1 := filepath.Join(dir, "a.zip")
+	if err := createSimpleZip(zip1, "a.txt", []byte("hello")); err != nil {
+		t.Fatal("create zip1", err)
+	}
+	missing := filepath.Join(dir, "does-not-exist.zip")
+
+	h := ZipHandler{methodmap: make(map[string]map[uint16]int)}
+
+	before := openFDCount(t)
+	if err := h.initialize_file([]string{zip1, missing}); err == nil {
+		t.Error("expected error for missing second file")
+	}
+	after := openFDCount(t)
+	if after > before {
+		t.Errorf("leaked file descriptors: before=%d after=%d", before, after)
+	}
+}
+
+func TestStartAutoReloadAddError(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename("/not/found/archive-for-watch.zip")
+
+	cmd := WebServer{handler: ZipHandler{methodmap: make(map[string]map[uint16]int)}}
+	wt, err := cmd.startAutoReload()
+	if err == nil {
+		t.Error("expected error when the watch target does not exist")
+	}
+	if wt != nil {
+		t.Error("expected nil watcher alongside a non-nil error")
+		wt.Close()
+	}
+}
+
+func waitForMethod(t *testing.T, h *ZipHandler, name string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		h.rwlock.RLock()
+		_, ok := h.methodmap[name]
+		h.rwlock.RUnlock()
+		if ok {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for %q to appear via autoreload", name)
+}
+
+func TestAutoReloadLoopSurvivesAtomicRename(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "archive.zip")
+	if err := createSimpleZip(zipPath, "a.txt", []byte("v1")); err != nil {
+		t.Fatal("create initial zip", err)
+	}
+
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipPath)
+
+	cmd := WebServer{handler: ZipHandler{methodmap: make(map[string]map[uint16]int)}}
+	if err := cmd.handler.initialize([]string{zipPath}, false); err != nil {
+		t.Fatal("initial initialize", err)
+	}
+	defer cmd.handler.Close()
+
+	wt, err := cmd.startAutoReload()
+	if err != nil {
+		t.Fatal("startAutoReload", err)
+	}
+	defer wt.Close()
+
+	// Atomic replace #1: write to a tmp file, then rename over zipPath.
+	tmp1 := zipPath + ".tmp1"
+	if err := createSimpleZip(tmp1, "b.txt", []byte("v2")); err != nil {
+		t.Fatal("create tmp1", err)
+	}
+	if err := os.Rename(tmp1, zipPath); err != nil {
+		t.Fatal("rename1", err)
+	}
+	waitForMethod(t, &cmd.handler, "b.txt", 2*time.Second)
+
+	// Atomic replace #2: proves the watch was re-armed after replace #1,
+	// not just that the first rename happened to still be observed.
+	tmp2 := zipPath + ".tmp2"
+	if err := createSimpleZip(tmp2, "c.txt", []byte("v3")); err != nil {
+		t.Fatal("create tmp2", err)
+	}
+	if err := os.Rename(tmp2, zipPath); err != nil {
+		t.Fatal("rename2", err)
+	}
+	waitForMethod(t, &cmd.handler, "c.txt", 2*time.Second)
 }

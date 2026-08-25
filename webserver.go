@@ -579,6 +579,11 @@ func (h *ZipHandler) initialize_file(input []string) error {
 	for _, v := range input {
 		zipfile, err := NewZipFileFile(v)
 		if err != nil {
+			for _, opened := range zipfiles {
+				if cerr := opened.Close(); cerr != nil {
+					slog.Error("close zipfile after partial failure", "error", cerr)
+				}
+			}
 			return err
 		}
 		zipfiles = append(zipfiles, zipfile)
@@ -724,60 +729,21 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	go func() {
-		var err error
 		for {
 			sig := <-sigs
 			slog.Info("caught signal", "signal", sig)
-			switch sig {
-			case syscall.SIGHUP:
-				if err = cmd.Reload(); err != nil {
-					slog.Error("reload failed", "error", err)
-					return
-				}
-			case syscall.SIGINT, syscall.SIGTERM:
-				if err = cmd.Shutdown(); err != nil {
-					slog.Error("terminate failed", "error", err)
-				}
+			if cmd.handleSignal(sig) {
 				return
 			}
 		}
 	}()
 
 	if cmd.AutoReload {
-		wt, err := fsnotify.NewWatcher()
+		wt, err := cmd.startAutoReload()
 		if err != nil {
-			slog.Error("watcher", "error", err)
-		}
-		defer wt.Close()
-		go func() {
-			for {
-				select {
-				case event, ok := <-wt.Events:
-					if !ok {
-						slog.Error("cannot process event", "event", event)
-						return
-					}
-					slog.Info("got watcher event", "event", event, "op", event.Op.String())
-					if event.Has(fsnotify.Write) {
-						slog.Info("modified", "name", event.Name)
-						if err = cmd.Reload(); err != nil {
-							slog.Error("reload error", "error", err)
-						}
-					}
-				case err, ok := <-wt.Errors:
-					if !ok {
-						slog.Error("cannot process error", "error", err)
-						return
-					}
-					slog.Info("got watcher error", "error", err)
-				}
-			}
-		}()
-
-		if err = wt.Add(archiveFilename()); err != nil {
-			slog.Error("watcher add", "error", err)
 			return err
 		}
+		defer wt.Close()
 	}
 
 	listener, err := do_listen(cmd.Listen)
@@ -795,9 +761,90 @@ func (cmd *WebServer) Execute(args []string) (err error) {
 	return nil
 }
 
+// startAutoReload sets up the fsnotify watcher and its event loop for
+// --autoreload. On any setup failure it returns (nil, err); it never
+// returns a watcher the caller must clean up alongside a non-nil error.
+func (cmd *WebServer) startAutoReload() (*fsnotify.Watcher, error) {
+	wt, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("watcher", "error", err)
+		return nil, err
+	}
+	path := archiveFilename()
+	go autoReloadLoop(wt, cmd, path)
+	if err := wt.Add(path); err != nil {
+		slog.Error("watcher add", "error", err)
+		wt.Close()
+		return nil, err
+	}
+	return wt, nil
+}
+
+// autoReloadLoop reacts to filesystem events on the watched archive.
+// fsnotify watches by inode, so a Write (in-place modification) is
+// handled directly, while an atomic replace (write-to-tmp + os.Rename
+// over the watched path) requires re-arming the watch on the new inode
+// at the same path before reloading. Which event that replace actually
+// delivers is platform-dependent: kqueue (macOS/BSD) reports
+// Remove/Rename; inotify (Linux) instead reports Chmod, because
+// overwriting the watched path drops its link count to zero, which
+// inotify surfaces as an attribute change (IN_ATTRIB) rather than a
+// delete/rename of the watch itself. All three are treated the same way.
+func autoReloadLoop(wt *fsnotify.Watcher, cmd *WebServer, watchPath string) {
+	for {
+		select {
+		case event, ok := <-wt.Events:
+			if !ok {
+				slog.Error("watcher events channel closed")
+				return
+			}
+			slog.Info("got watcher event", "event", event, "op", event.Op.String())
+			switch {
+			case event.Has(fsnotify.Remove), event.Has(fsnotify.Rename), event.Has(fsnotify.Chmod):
+				slog.Info("watched file replaced, re-arming watch", "name", event.Name)
+				if err := wt.Add(watchPath); err != nil {
+					slog.Error("re-add watcher", "error", err)
+				}
+				if err := cmd.Reload(); err != nil {
+					slog.Error("reload error", "error", err)
+				}
+			case event.Has(fsnotify.Write):
+				slog.Info("modified", "name", event.Name)
+				if err := cmd.Reload(); err != nil {
+					slog.Error("reload error", "error", err)
+				}
+			}
+		case err, ok := <-wt.Errors:
+			if !ok {
+				slog.Error("watcher errors channel closed")
+				return
+			}
+			slog.Info("got watcher error", "error", err)
+		}
+	}
+}
+
 func (cmd *WebServer) Shutdown() error {
 	slog.Info("graceful shutdown")
 	return cmd.server.Shutdown(context.TODO())
+}
+
+// handleSignal processes one OS signal and reports whether the caller
+// should stop listening for further signals.
+func (cmd *WebServer) handleSignal(sig os.Signal) (exit bool) {
+	switch sig {
+	case syscall.SIGHUP:
+		if err := cmd.Reload(); err != nil {
+			slog.Error("reload failed", "error", err)
+		}
+		return false
+	case syscall.SIGINT, syscall.SIGTERM:
+		if err := cmd.Shutdown(); err != nil {
+			slog.Error("terminate failed", "error", err)
+		}
+		return true
+	}
+	return false
 }
 
 func (cmd *WebServer) Reload() error {
