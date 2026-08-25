@@ -103,8 +103,8 @@ func (cmd *ZipSort) Execute(args []string) (err error) {
 		}
 		return err
 	}
-	defer zipfile.Close()
 	defer ofp.Close()
+	defer zipfile.Close()
 	files := make(map[string]*zip.File, 0)
 	for _, fname := range args {
 		zf, err := zip.OpenReader(fname)

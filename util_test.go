@@ -358,11 +358,59 @@ func TestZipPassThru(t *testing.T) {
 	})
 
 	t.Run("writer closed", func(t *testing.T) {
+		// archive/zip.Writer does not track a "closed" state for Copy/CreateRaw,
+		// so writing after Close succeeds (it just appends past the already
+		// written central directory). This documents that non-error behavior
+		// rather than asserting one that doesn't happen.
 		zw := zip.NewWriter(&bytes.Buffer{})
 		if err := zw.Close(); err != nil {
 			t.Error("close", err)
 			return
 		}
-		_ = ZipPassThru(zw, zr.File[:1])
+		if err := ZipPassThru(zw, zr.File[:1]); err != nil {
+			t.Error("unexpected error", err)
+		}
 	})
+
+	t.Run("copy error", func(t *testing.T) {
+		// 128mb.txt's raw bytes exceed zip.Writer's internal bufio buffer, so
+		// the underlying writer is hit - and fails - during wr.Copy itself.
+		zw := zip.NewWriter(&failWriter{failAfter: 0})
+		if err := ZipPassThru(zw, zr.File[:1]); err == nil {
+			t.Error("expected copy error")
+		}
+	})
+
+	t.Run("flush error", func(t *testing.T) {
+		// 512b.txt is small enough to stay inside zip.Writer's internal buffer
+		// during Copy, so the underlying writer only sees a Write call once
+		// Flush forces it out - this isolates ZipPassThru's Flush error branch
+		// from the Copy error branch covered above.
+		var small *zip.File
+		for _, f := range zr.File {
+			if f.Name == "512b.txt" {
+				small = f
+			}
+		}
+		if small == nil {
+			t.Fatal("512b.txt not found in test fixture")
+		}
+		zw := zip.NewWriter(&failWriter{failAfter: 0})
+		if err := ZipPassThru(zw, []*zip.File{small}); err == nil {
+			t.Error("expected flush error")
+		}
+	})
+}
+
+type failWriter struct {
+	written   int
+	failAfter int
+}
+
+func (f *failWriter) Write(p []byte) (int, error) {
+	if f.written >= f.failAfter {
+		return 0, fmt.Errorf("simulated write failure")
+	}
+	f.written += len(p)
+	return len(p), nil
 }

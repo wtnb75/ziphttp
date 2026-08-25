@@ -124,7 +124,6 @@ func TestZipCmdNormal(t *testing.T) {
 }
 
 func TestZipCmdSiteMap(t *testing.T) {
-	t.Skip()
 	orig_global := globalOption
 	defer func() {
 		globalOption = orig_global
@@ -164,10 +163,10 @@ func TestZipCmdSiteMap(t *testing.T) {
 	if err != nil {
 		t.Error("open", err)
 	}
-	flag := false
+	var sitemapFile *zip.File
 	for _, zf := range zr.File {
 		if zf.Name == "sitemap.xml" {
-			flag = true
+			sitemapFile = zf
 			continue
 		}
 		if zf.Name == "128m.txt" {
@@ -183,8 +182,23 @@ func TestZipCmdSiteMap(t *testing.T) {
 			t.Error("crc mismatch", zf.Name, zf.CRC32, crcmap[zf.Name])
 		}
 	}
-	if !flag {
-		t.Error("no sitemap generated")
+	if sitemapFile == nil {
+		t.Fatal("no sitemap generated")
+	}
+	rc, err := sitemapFile.Open()
+	if err != nil {
+		t.Fatal("open sitemap.xml", err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal("read sitemap.xml", err)
+	}
+	if len(data) == 0 {
+		t.Error("sitemap.xml is empty, expected marshaled XML content")
+	}
+	if !strings.Contains(string(data), "http://example.com/path/") {
+		t.Errorf("sitemap.xml does not contain expected URL: %s", data)
 	}
 }
 
@@ -499,6 +513,34 @@ func TestZipCmdGenerateSitemap(t *testing.T) {
 		}
 		if err := zw.Close(); err != nil {
 			t.Error("close", err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal("reopen", err)
+		}
+		var sitemapFile *zip.File
+		for _, f := range zr.File {
+			if f.Name == "sitemap.xml" {
+				sitemapFile = f
+			}
+		}
+		if sitemapFile == nil {
+			t.Fatal("sitemap.xml not found in output")
+		}
+		rc, err := sitemapFile.Open()
+		if err != nil {
+			t.Fatal("open sitemap.xml", err)
+		}
+		defer rc.Close()
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatal("read sitemap.xml", err)
+		}
+		if len(data) == 0 {
+			t.Error("sitemap.xml is empty, expected marshaled XML content")
+		}
+		if !strings.Contains(string(data), "https://example.com/a/") {
+			t.Errorf("sitemap.xml does not contain expected URL: %s", data)
 		}
 	})
 

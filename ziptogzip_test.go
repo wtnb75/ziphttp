@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"hash/crc32"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -279,6 +280,145 @@ func TestZiptoGzipExecuteSkipSuspiciousAndStore(t *testing.T) {
 	}
 	if entries[0].Name() != "input.zip" {
 		t.Error("unexpected output file", entries[0].Name())
+	}
+}
+
+func TestZiptoGzipExecuteTarStdout(t *testing.T) {
+	zipname := prepare_testzip(t)
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipname)
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal("pipe", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+
+	cmd := ZiptoGzip{All: true, Tar: "-", TarFormat: "GNU"}
+	execErr := cmd.Execute([]string{"4kb.txt"})
+	if cerr := w.Close(); cerr != nil {
+		t.Error("close pipe writer", cerr)
+	}
+	os.Stdout = oldStdout
+	if execErr != nil {
+		t.Error("execute", execErr)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Error("read stdout", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected tar bytes written to stdout")
+	}
+}
+
+func TestZiptoGzipExecuteArgsFilter(t *testing.T) {
+	td := t.TempDir()
+	zipname := filepath.Join(td, "input.zip")
+	f, err := os.Create(zipname)
+	if err != nil {
+		t.Fatal("create zip", err)
+	}
+	zw := zip.NewWriter(f)
+	for _, name := range []string{"keep.txt", "skip.txt"} {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: time.Unix(1, 0)})
+		if err != nil {
+			t.Fatal("create header", name, err)
+		}
+		if _, err := w.Write([]byte(name)); err != nil {
+			t.Fatal("write", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal("close writer", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal("close file", err)
+	}
+
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal("getwd", err)
+	}
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+		_ = os.Chdir(oldwd)
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipname)
+	outdir := t.TempDir()
+	if err := os.Chdir(outdir); err != nil {
+		t.Fatal("chdir", err)
+	}
+
+	cmd := ZiptoGzip{All: true}
+	if err := cmd.Execute([]string{"keep.txt"}); err != nil {
+		t.Fatal("execute", err)
+	}
+	if _, err := os.Stat(filepath.Join(outdir, "keep.txt.gz")); err != nil {
+		t.Error("expected matching file to be extracted", err)
+	}
+	if _, err := os.Stat(filepath.Join(outdir, "skip.txt.gz")); err == nil {
+		t.Error("non-matching file should not have been extracted")
+	}
+}
+
+func TestZiptoGzipExecuteRejectsAbsoluteEntryPath(t *testing.T) {
+	td := t.TempDir()
+	zipname := filepath.Join(td, "input.zip")
+	f, err := os.Create(zipname)
+	if err != nil {
+		t.Fatal("create zip", err)
+	}
+	zw := zip.NewWriter(f)
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: "/etc/evil.txt", Method: zip.Deflate, Modified: time.Unix(1, 0)})
+	if err != nil {
+		t.Fatal("create header", err)
+	}
+	if _, err := w.Write([]byte("evil")); err != nil {
+		t.Fatal("write", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal("close writer", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal("close file", err)
+	}
+
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal("getwd", err)
+	}
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+		_ = os.Chdir(oldwd)
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipname)
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal("chdir", err)
+	}
+
+	cmd := ZiptoGzip{All: true}
+	if err := cmd.Execute(nil); err == nil {
+		t.Error("expected safeOutputPath to reject an absolute entry name")
+	}
+	if _, err := os.Stat("/etc/evil.txt.gz"); err == nil {
+		t.Fatal("SECURITY: file escaped the output directory")
 	}
 }
 
