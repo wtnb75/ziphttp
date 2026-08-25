@@ -540,6 +540,7 @@ func (h *ZipHandler) init2(inputs []ZipFile) {
 			}(idx, inputs)
 			if fi == nil {
 				slog.Error("not found", "name", fname, "idx", idx)
+				continue
 			}
 			if crc32 == 0 {
 				crc32 = fi.CRC32
@@ -619,11 +620,13 @@ func (h *ZipHandler) initialize(filenames []string, inmemory bool) error {
 			}
 			if _, err = fp.Seek(offs, io.SeekStart); err != nil {
 				slog.Error("seek", "file", filename, "error", err)
+				fp.Close()
 				return err
 			}
 			buf, err := io.ReadAll(fp)
 			if err != nil {
 				slog.Error("read file to memory", "file", filename, "error", err)
+				fp.Close()
 				return err
 			}
 			fp.Close()

@@ -135,6 +135,10 @@ func ArchiveOffset(archivefile string) (int64, error) {
 		slog.Error("end of central directory not found", "name", archivefile, "bytes", tail)
 		return 0, fmt.Errorf("end of central directory not found: %s", archivefile)
 	}
+	if idx+0xc+4 > sz {
+		slog.Error("end of central directory record truncated", "name", archivefile, "idx", idx, "size", sz)
+		return 0, fmt.Errorf("end of central directory record truncated: %s", archivefile)
+	}
 	cdsize := binary.LittleEndian.Uint32(tail[idx+0xc : idx+0xc+4])
 	cur, err = fp.Seek(-512+int64(idx)-int64(cdsize), io.SeekEnd)
 	if err != nil {
