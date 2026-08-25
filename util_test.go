@@ -189,6 +189,34 @@ func TestArchiveOffsetInvalidCentralDirectorySignature(t *testing.T) {
 	}
 }
 
+func TestArchiveOffsetTruncatedEOCD(t *testing.T) {
+	t.Parallel()
+	tmpf, err := os.CreateTemp(t.TempDir(), "")
+	if err != nil {
+		t.Fatal("tempfile", err)
+	}
+	defer os.Remove(tmpf.Name())
+
+	// 596 zero bytes of padding, then the 4-byte EOCD signature as the very
+	// last bytes of the file. The -512-from-end read window then ends right
+	// at the signature, leaving no room to read the cdsize field that
+	// should follow it in a well-formed EOCD record. Before the bounds
+	// check this panicked with "slice bounds out of range" instead of
+	// returning an error.
+	padding := make([]byte, 596)
+	if _, err := tmpf.Write(padding); err != nil {
+		t.Fatal("write padding", err)
+	}
+	if _, err := tmpf.Write([]byte{0x50, 0x4b, 0x05, 0x06}); err != nil {
+		t.Fatal("write eocd signature", err)
+	}
+	tmpf.Close()
+
+	if _, err := ArchiveOffset(tmpf.Name()); err == nil {
+		t.Error("expected error for truncated EOCD record, got nil")
+	}
+}
+
 func TestArchiveOffsetOld(t *testing.T) {
 	t.Parallel()
 	fname := prepare_testzip(t)

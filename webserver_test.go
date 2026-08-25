@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -940,4 +941,53 @@ func TestAutoReloadLoopSurvivesAtomicRename(t *testing.T) {
 		t.Fatal("rename2", err)
 	}
 	waitForMethod(t, &cmd.handler, "c.txt", 2*time.Second)
+}
+
+// flakyFileZip wraps a ZipFile whose File() call returns nil the second
+// time a specific index is queried, even though Files() still reports it
+// as present. init2 builds its integrity-check index (methodmap) from a
+// first pass over File(idx), then re-resolves those same indexes from
+// scratch in a second pass; a ZipFile implementation that isn't idempotent
+// between those two passes (e.g. due to a concurrent close or lazy-load
+// error) can surface a nil *zip.File on the second pass, which is the
+// scenario this simulates.
+type flakyFileZip struct {
+	inner    ZipFile
+	poisonAt int
+	calls    int
+}
+
+func (z *flakyFileZip) File(idx int) *zip.File {
+	if idx == z.poisonAt {
+		z.calls++
+		if z.calls > 1 {
+			return nil
+		}
+	}
+	return z.inner.File(idx)
+}
+
+func (z *flakyFileZip) Open(name string) (fs.File, error) { return z.inner.Open(name) }
+func (z *flakyFileZip) Close() error                      { return z.inner.Close() }
+func (z *flakyFileZip) Files() int                        { return z.inner.Files() }
+
+func TestInit2SkipsNilFileDuringIntegrityCheck(t *testing.T) {
+	t.Parallel()
+	inner, err := NewZipFileBytes(testzip)
+	if err != nil {
+		t.Fatal("NewZipFileBytes", err)
+	}
+	zf := &flakyFileZip{inner: inner, poisonAt: 1}
+
+	h := &ZipHandler{}
+	// Must not panic with a nil pointer dereference when the integrity
+	// check's second pass resolves index 1 to a nil *zip.File.
+	h.init2([]ZipFile{zf})
+
+	if len(h.zipfiles) != 1 {
+		t.Error("zipfiles not set")
+	}
+	if len(h.methodmap) != zf.Files() {
+		t.Error("methodmap size", len(h.methodmap), "!=", zf.Files())
+	}
 }
