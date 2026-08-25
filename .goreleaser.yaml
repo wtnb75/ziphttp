@@ -7,7 +7,8 @@ before:
     - go mod tidy
 
 builds:
-  - env:
+  - id: ziphttp
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -87,9 +88,24 @@ docker_manifests:
        #- "ghcr.io/wtnb75/{{ .ProjectName }}:{{ .Version }}-wasi"
 
 archives:
-  - formats: ['binary']
+  - id: ziphttp
+    ids: [ziphttp]
+    formats: ['binary']
     name_template: >-
       {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: ['zip']
+  - id: ziphttp-otel
+    ids: [ziphttp-otel]
+    formats: ['binary']
+    name_template: >-
+      {{ .ProjectName }}_otel_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
