@@ -1,4 +1,4 @@
-![CI status](https://github.com/wtnb75/ziphttp/actions/workflows/golang.yml/badge.svg)
+![CI status](https://github.com/wtnb75/ziphttp/actions/workflows/main.yml/badge.svg)
 
 # ziphttp: A simple HTTP server for serving files from a ZIP archive
 
