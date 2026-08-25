@@ -407,23 +407,25 @@ func (cmd *ZipCmd) generate_sitemap(root *SiteMapRoot, zipwr *zip.Writer) error 
 			Method:   zip.Deflate,
 			Modified: root.LastMod(),
 		}
-		if wr, err := zipwr.CreateHeader(&fh); err != nil {
+		wr, err := zipwr.CreateHeader(&fh)
+		if err != nil {
 			slog.Error("create sitemap", "error", err)
-			xmlstr, err := xml.Marshal(root)
-			if err != nil {
-				slog.Error("sitemap generate error", "error", err)
-				return err
-			}
-			written, err := wr.Write(xmlstr)
-			if err != nil {
-				slog.Error("write sitemap", "error", err, "written", written)
-				return err
-			}
-			slog.Debug("sitemap written", "written", written)
-			if err := zipwr.Flush(); err != nil {
-				slog.Error("sitemap flush", "error", err)
-				return err
-			}
+			return err
+		}
+		xmlstr, err := xml.Marshal(root)
+		if err != nil {
+			slog.Error("sitemap generate error", "error", err)
+			return err
+		}
+		written, err := wr.Write(xmlstr)
+		if err != nil {
+			slog.Error("write sitemap", "error", err, "written", written)
+			return err
+		}
+		slog.Debug("sitemap written", "written", written)
+		if err := zipwr.Flush(); err != nil {
+			slog.Error("sitemap flush", "error", err)
+			return err
 		}
 	}
 	return nil

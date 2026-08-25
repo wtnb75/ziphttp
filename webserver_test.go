@@ -4,7 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -652,6 +654,14 @@ func TestInitializeInMemory(t *testing.T) {
 	}
 }
 
+func TestInitializeInMemoryMissingFile(t *testing.T) {
+	t.Parallel()
+	h := ZipHandler{methodmap: make(map[string]map[uint16]int)}
+	if err := h.initialize([]string{"/no/such/archive.zip"}, true); err == nil {
+		t.Error("expected error for a missing archive")
+	}
+}
+
 func TestReloadError(t *testing.T) {
 	oldArchive := globalOption.Archive
 	oldSelf := globalOption.Self
@@ -789,6 +799,48 @@ func TestWebServerExecuteInvalidHeader(t *testing.T) {
 	}
 }
 
+func TestInitOtelUnsupported(t *testing.T) {
+	t.Parallel()
+	cmd := &WebServer{}
+	stop, handler, err := cmd.init_otel(&cmd.handler, "test")
+	if err == nil {
+		t.Error("expected error from unsupported opentelemetry build")
+	}
+	if stop != nil {
+		t.Error("expected nil stop func")
+	}
+	if handler != nil {
+		t.Error("expected nil handler", handler)
+	}
+}
+
+func TestWebServerExecuteOpenTelemetryFallback(t *testing.T) {
+	zipname := prepare_testzip(t)
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipname)
+
+	// Hold the address so Execute's own do_listen call fails, letting us
+	// observe the OpenTelemetry init/fallback and signal-handler setup that
+	// run just before it without ever entering the blocking Serve loop.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal("reserve address", err)
+	}
+	defer ln.Close()
+
+	cmd := WebServer{Listen: ln.Addr().String(), OpenTelemetry: true}
+	err = cmd.Execute(nil)
+	if err == nil {
+		t.Error("expected listen error because address is already in use")
+	}
+}
+
 func TestShutdown(t *testing.T) {
 	t.Parallel()
 	cmd := WebServer{}
@@ -803,26 +855,25 @@ func createSimpleZip(path, name string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	zw := zip.NewWriter(f)
-	w, err := zw.Create(name)
+	if err := createSimpleZipInto(f, name, content); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+func createSimpleZipInto(w io.Writer, name string, content []byte) error {
+	zw := zip.NewWriter(w)
+	fw, err := zw.Create(name)
 	if err != nil {
 		_ = zw.Close()
-		_ = f.Close()
 		return err
 	}
-	if _, err = w.Write(content); err != nil {
+	if _, err = fw.Write(content); err != nil {
 		_ = zw.Close()
-		_ = f.Close()
 		return err
 	}
-	if err = zw.Close(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return nil
+	return zw.Close()
 }
 
 func openFDCount(t *testing.T) int {
@@ -941,6 +992,51 @@ func TestAutoReloadLoopSurvivesAtomicRename(t *testing.T) {
 		t.Fatal("rename2", err)
 	}
 	waitForMethod(t, &cmd.handler, "c.txt", 2*time.Second)
+}
+
+func TestAutoReloadLoopInPlaceWrite(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "archive.zip")
+	if err := createSimpleZip(zipPath, "a.txt", []byte("v1")); err != nil {
+		t.Fatal("create initial zip", err)
+	}
+
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+	globalOption.Archive = flags.Filename(zipPath)
+
+	cmd := WebServer{handler: ZipHandler{methodmap: make(map[string]map[uint16]int)}}
+	if err := cmd.handler.initialize([]string{zipPath}, false); err != nil {
+		t.Fatal("initial initialize", err)
+	}
+	defer cmd.handler.Close()
+
+	wt, err := cmd.startAutoReload()
+	if err != nil {
+		t.Fatal("startAutoReload", err)
+	}
+	defer wt.Close()
+
+	// In-place modification (no rename): fsnotify reports this as a Write
+	// event on the still-watched inode, exercising autoReloadLoop's
+	// event.Has(fsnotify.Write) branch rather than the replace-detection
+	// branch the rename-based test above covers.
+	f, err := os.OpenFile(zipPath, os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal("reopen for in-place write", err)
+	}
+	if err := createSimpleZipInto(f, "d.txt", []byte("v4")); err != nil {
+		t.Fatal("rewrite zip contents", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal("close", err)
+	}
+	waitForMethod(t, &cmd.handler, "d.txt", 2*time.Second)
 }
 
 // flakyFileZip wraps a ZipFile whose File() call returns nil the second

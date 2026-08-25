@@ -4,6 +4,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 )
@@ -112,6 +113,30 @@ func TestDiffCRC_choose_new(t *testing.T) {
 	res := ChooseFrom(input, "")
 	if res != input[0] {
 		t.Error("compress uncompressed size")
+	}
+}
+
+func TestDiffCRC_Less_sameModTimeAndSize_compressedSmallerWins(t *testing.T) {
+	t.Parallel()
+	same := time.Unix(50, 0)
+	a := &ChooseFile{Name: "a", ModTime: same, UncompressedSize: 20, CompressedSize: 15}
+	b := &ChooseFile{Name: "b", ModTime: same, UncompressedSize: 20, CompressedSize: 10}
+	list := DiffCRC{a, b}
+	sort.Sort(list)
+	if list[0] != b {
+		t.Error("expected smaller compressed size first", list)
+	}
+}
+
+func TestDiffCRC_Less_sameModTimeAndSize_compressedPreferredOverUncompressed(t *testing.T) {
+	t.Parallel()
+	same := time.Unix(50, 0)
+	compressed := &ChooseFile{Name: "compressed", ModTime: same, UncompressedSize: 20, CompressedSize: 15}
+	uncompressed := &ChooseFile{Name: "uncompressed", ModTime: same, UncompressedSize: 20, CompressedSize: 0}
+	list := DiffCRC{uncompressed, compressed}
+	sort.Sort(list)
+	if list[0] != compressed {
+		t.Error("expected compressed entry first", list)
 	}
 }
 

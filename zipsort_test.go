@@ -10,6 +10,51 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
+type zipSortTestEntry struct {
+	name    string
+	content string
+	mod     time.Time
+}
+
+func writeSortTestZip(t *testing.T, path string, entries []zipSortTestEntry) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal("create", path, err)
+	}
+	zw := zip.NewWriter(f)
+	for _, e := range entries {
+		fh := &zip.FileHeader{Name: e.name, Modified: e.mod, Method: zip.Store}
+		w, err := zw.CreateHeader(fh)
+		if err != nil {
+			t.Fatal("create header", e.name, err)
+		}
+		if _, err = w.Write([]byte(e.content)); err != nil {
+			t.Fatal("write", e.name, err)
+		}
+	}
+	if err = zw.Close(); err != nil {
+		t.Fatal("close writer", err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal("close file", err)
+	}
+}
+
+func readZipNamesInOrder(t *testing.T, path string) []string {
+	t.Helper()
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal("open output", path, err)
+	}
+	defer zr.Close()
+	names := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	return names
+}
+
 func TestCompareFile(t *testing.T) {
 	t.Parallel()
 	t.Run("prefer smaller compressed when crc same", func(t *testing.T) {
@@ -97,6 +142,164 @@ func TestPrepareOutput(t *testing.T) {
 			t.Error("expected copied executable contents")
 		}
 	})
+}
+
+func TestZipSortExecuteOrder(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+
+	inzip := filepath.Join(t.TempDir(), "in.zip")
+	writeSortTestZip(t, inzip, []zipSortTestEntry{
+		{name: "a.txt", content: "AAAA", mod: time.Unix(300, 0)},
+		{name: "b.txt", content: "BB", mod: time.Unix(200, 0)},
+		{name: "c.txt", content: "CCCCCC", mod: time.Unix(100, 0)},
+	})
+
+	tests := []struct {
+		name     string
+		cmd      ZipSort
+		expected []string
+	}{
+		{name: "name asc", cmd: ZipSort{SortBy: "name"}, expected: []string{"a.txt", "b.txt", "c.txt"}},
+		{name: "name desc", cmd: ZipSort{SortBy: "name", Reverse: true}, expected: []string{"c.txt", "b.txt", "a.txt"}},
+		{name: "time newest first (default)", cmd: ZipSort{SortBy: "time"}, expected: []string{"a.txt", "b.txt", "c.txt"}},
+		{name: "time oldest first (reverse)", cmd: ZipSort{SortBy: "time", Reverse: true}, expected: []string{"c.txt", "b.txt", "a.txt"}},
+		{name: "usize smallest first (default)", cmd: ZipSort{SortBy: "usize"}, expected: []string{"b.txt", "a.txt", "c.txt"}},
+		{name: "usize largest first (reverse)", cmd: ZipSort{SortBy: "usize", Reverse: true}, expected: []string{"c.txt", "a.txt", "b.txt"}},
+		{name: "csize smallest first (default)", cmd: ZipSort{SortBy: "csize"}, expected: []string{"b.txt", "a.txt", "c.txt"}},
+		{name: "csize largest first (reverse)", cmd: ZipSort{SortBy: "csize", Reverse: true}, expected: []string{"c.txt", "a.txt", "b.txt"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outzip := filepath.Join(t.TempDir(), "out.zip")
+			globalOption.Archive = flags.Filename(outzip)
+			if err := tc.cmd.Execute([]string{inzip}); err != nil {
+				t.Fatal("execute", err)
+			}
+			got := readZipNamesInOrder(t, outzip)
+			if len(got) != len(tc.expected) {
+				t.Fatalf("got %v, want %v", got, tc.expected)
+			}
+			for i := range got {
+				if got[i] != tc.expected[i] {
+					t.Errorf("order mismatch at %d: got %v, want %v", i, got, tc.expected)
+					break
+				}
+			}
+		})
+	}
+}
+
+func TestZipSortExecuteStripPrefix(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+
+	inzip := filepath.Join(t.TempDir(), "in.zip")
+	writeSortTestZip(t, inzip, []zipSortTestEntry{
+		{name: "prefix/a.txt", content: "AAAA", mod: time.Unix(100, 0)},
+	})
+
+	outzip := filepath.Join(t.TempDir(), "out.zip")
+	globalOption.Archive = flags.Filename(outzip)
+	cmd := ZipSort{SortBy: "none", StripPrefix: []string{"prefix/"}}
+	if err := cmd.Execute([]string{inzip}); err != nil {
+		t.Fatal("execute", err)
+	}
+	got := readZipNamesInOrder(t, outzip)
+	if len(got) != 1 || got[0] != "a.txt" {
+		t.Errorf("expected stripped name [a.txt], got %v", got)
+	}
+}
+
+func TestZipSortExecuteMergeAcrossZips(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+
+	zipA := filepath.Join(t.TempDir(), "a.zip")
+	zipB := filepath.Join(t.TempDir(), "b.zip")
+	// same-crc.txt: identical content (same CRC) in both inputs, but A is
+	// older - compare_file must keep the older duplicate on a CRC match.
+	// diff-crc.txt: different content (different CRC), B is newer -
+	// compare_file must keep the newer duplicate when CRCs differ.
+	writeSortTestZip(t, zipA, []zipSortTestEntry{
+		{name: "same-crc.txt", content: "identical", mod: time.Unix(100, 0)},
+		{name: "diff-crc.txt", content: "alpha", mod: time.Unix(50, 0)},
+	})
+	writeSortTestZip(t, zipB, []zipSortTestEntry{
+		{name: "same-crc.txt", content: "identical", mod: time.Unix(200, 0)},
+		{name: "diff-crc.txt", content: "beta-x", mod: time.Unix(999, 0)},
+	})
+
+	outzip := filepath.Join(t.TempDir(), "out.zip")
+	globalOption.Archive = flags.Filename(outzip)
+	cmd := ZipSort{SortBy: "name"}
+	if err := cmd.Execute([]string{zipA, zipB}); err != nil {
+		t.Fatal("execute", err)
+	}
+
+	zr, err := zip.OpenReader(outzip)
+	if err != nil {
+		t.Fatal("open output", err)
+	}
+	defer zr.Close()
+	if len(zr.File) != 2 {
+		t.Fatalf("expected exactly one entry per name, got %d files", len(zr.File))
+	}
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal("open entry", f.Name, err)
+		}
+		buf := make([]byte, 32)
+		n, _ := rc.Read(buf)
+		rc.Close()
+		got := string(buf[:n])
+		switch f.Name {
+		case "same-crc.txt":
+			if !f.Modified.Equal(time.Unix(100, 0)) {
+				t.Errorf("same-crc.txt: expected the older duplicate (A) to win, got modtime %v", f.Modified)
+			}
+		case "diff-crc.txt":
+			if got != "beta-x" {
+				t.Errorf("diff-crc.txt: expected the newer duplicate (B, %q) to win, got %q", "beta-x", got)
+			}
+		default:
+			t.Errorf("unexpected entry %s", f.Name)
+		}
+	}
+}
+
+func TestZipSortExecuteOpenReaderError(t *testing.T) {
+	oldArchive := globalOption.Archive
+	oldSelf := globalOption.Self
+	defer func() {
+		globalOption.Archive = oldArchive
+		globalOption.Self = oldSelf
+	}()
+	globalOption.Self = false
+
+	outzip := filepath.Join(t.TempDir(), "out.zip")
+	globalOption.Archive = flags.Filename(outzip)
+	cmd := ZipSort{SortBy: "none"}
+	if err := cmd.Execute([]string{"/no/such/input.zip"}); err == nil {
+		t.Error("expected error opening a nonexistent input zip")
+	}
 }
 
 func TestZipSortExecute(t *testing.T) {
