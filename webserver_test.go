@@ -44,8 +44,8 @@ func TestStored(t *testing.T) {
 	if got.Result().ContentLength != 512 {
 		t.Error("length", got.Result().ContentLength)
 	}
-	if !strings.HasPrefix(got.Result().Header.Get("etag"), "W/") {
-		t.Error("etag", got.Result().Header.Get("etag"))
+	if !strings.HasPrefix(got.Result().Header.Get("ETag"), "W/") {
+		t.Error("etag", got.Result().Header.Get("ETag"))
 	}
 	if got.Result().Header.Get("Content-Encoding") == "gzip" {
 		t.Error("not stored", got.Result().Header.Get("Content-Encoding"))

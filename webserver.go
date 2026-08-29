@@ -203,7 +203,7 @@ func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap 
 		etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 		if conditional(r, etag, fi) {
 			*statuscode = http.StatusNotModified
-			w.Header().Add("Etag", etag)
+			w.Header().Add("ETag", etag)
 			w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 			w.WriteHeader(*statuscode)
 			return nil, ErrNotModified
@@ -217,7 +217,7 @@ func (h *ZipHandler) handle_pre(w http.ResponseWriter, r *http.Request, filemap 
 		}
 		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 		if etag != "" {
-			w.Header().Add("Etag", etag)
+			w.Header().Add("ETag", etag)
 		}
 		return fi, nil
 	}
