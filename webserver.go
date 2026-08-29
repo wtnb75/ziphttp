@@ -427,7 +427,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 			w.Header().Set("Content-Type", "application/gzip")
-			w.Header().Set("Etag", etag+"_gz")
+			w.Header().Set("ETag", etag+"_gz")
 			written, err := CopyGzip(w, fi)
 			if err != nil {
 				slog.Error("copygzip", "error", err, "written", written)
@@ -483,7 +483,7 @@ func (h *ZipHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	etag := "W/" + strconv.FormatUint(uint64(fi.CRC32), 16)
 	if conditional(r, etag, fi) {
 		statuscode = http.StatusNotModified
-		w.Header().Add("Etag", etag)
+		w.Header().Add("ETag", etag)
 		w.Header().Add("Last-Modified", fi.Modified.Format(http.TimeFormat))
 		w.WriteHeader(statuscode)
 		return

@@ -130,8 +130,8 @@ func TestDeflate(t *testing.T) {
 	if got.Result().ContentLength == 4096 {
 		t.Error("length", got.Result().ContentLength)
 	}
-	if !strings.HasPrefix(got.Result().Header.Get("Etag"), "W/") {
-		t.Error("etag", got.Result().Header.Get("Etag"))
+	if !strings.HasPrefix(got.Result().Header.Get("ETag"), "W/") {
+		t.Error("etag", got.Result().Header.Get("ETag"))
 	}
 	if got.Result().Header.Get("Content-Encoding") != "gzip" {
 		t.Error("gzip", got.Result().Header.Get("Content-Encoding"))
@@ -147,8 +147,8 @@ func TestDeflate(t *testing.T) {
 	if got2.Result().ContentLength != 4096 {
 		t.Error("length(decompress)", got2.Result().ContentLength)
 	}
-	if !strings.HasPrefix(got2.Result().Header.Get("Etag"), "W/") {
-		t.Error("etag(decompress)", got2.Result().Header.Get("Etag"))
+	if !strings.HasPrefix(got2.Result().Header.Get("ETag"), "W/") {
+		t.Error("etag(decompress)", got2.Result().Header.Get("ETag"))
 	}
 	if got2.Result().Header.Get("Content-Encoding") == "gzip" {
 		t.Error("gzip(decompress)", got2.Result().Header.Get("Content-Encoding"))
@@ -469,7 +469,7 @@ func TestGzipSuffixRequest(t *testing.T) {
 	if ctype := got.Result().Header.Get("Content-Type"); ctype != "application/gzip" {
 		t.Error("content-type", ctype)
 	}
-	if etag := got.Result().Header.Get("Etag"); !strings.HasSuffix(etag, "_gz") {
+	if etag := got.Result().Header.Get("ETag"); !strings.HasSuffix(etag, "_gz") {
 		t.Error("etag", etag)
 	}
 	if got.Body.Len() == 0 {
